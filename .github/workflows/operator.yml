@@ -169,7 +169,7 @@ jobs:
         run: docker save -o /tmp/image.tar ${OPERATOR_IMAGE}
 
       - name: Save container as artifact
-        uses: actions/upload-artifact@83fd05a356d7e2593de66fc9913b3002723633cb
+        uses: actions/upload-artifact@0b7f8abb1508181956e8e162db84b466c27e18ce
         with:
           name: volsync-operator
           path: /tmp/image.tar
@@ -189,7 +189,7 @@ jobs:
         run: docker save -o /tmp/image.tar ${RCLONE_IMAGE}
 
       - name: Save container as artifact
-        uses: actions/upload-artifact@83fd05a356d7e2593de66fc9913b3002723633cb
+        uses: actions/upload-artifact@0b7f8abb1508181956e8e162db84b466c27e18ce
         with:
           name: volsync-mover-rclone-container
           path: /tmp/image.tar
@@ -209,7 +209,7 @@ jobs:
         run: docker save -o /tmp/image.tar ${RESTIC_IMAGE}
 
       - name: Save container as artifact
-        uses: actions/upload-artifact@83fd05a356d7e2593de66fc9913b3002723633cb
+        uses: actions/upload-artifact@0b7f8abb1508181956e8e162db84b466c27e18ce
         with:
           name: volsync-mover-restic-container
           path: /tmp/image.tar
@@ -229,7 +229,7 @@ jobs:
         run: docker save -o /tmp/image.tar ${RSYNC_IMAGE}
 
       - name: Save container as artifact
-        uses: actions/upload-artifact@83fd05a356d7e2593de66fc9913b3002723633cb
+        uses: actions/upload-artifact@0b7f8abb1508181956e8e162db84b466c27e18ce
         with:
           name: volsync-mover-rsync-container
           path: /tmp/image.tar
@@ -249,7 +249,7 @@ jobs:
         run: docker save -o /tmp/image.tar ${RSYNC_TLS_IMAGE}
 
       - name: Save container as artifact
-        uses: actions/upload-artifact@83fd05a356d7e2593de66fc9913b3002723633cb
+        uses: actions/upload-artifact@0b7f8abb1508181956e8e162db84b466c27e18ce
         with:
           name: volsync-mover-rsync-tls-container
           path: /tmp/image.tar
@@ -269,7 +269,7 @@ jobs:
         run: docker save -o /tmp/image.tar ${SYNCTHING_IMAGE}
 
       - name: Save container as artifact
-        uses: actions/upload-artifact@83fd05a356d7e2593de66fc9913b3002723633cb
+        uses: actions/upload-artifact@0b7f8abb1508181956e8e162db84b466c27e18ce
         with:
           name: volsync-mover-syncthing-container
           path: /tmp/image.tar
@@ -306,7 +306,7 @@ jobs:
         run: docker save -o /tmp/image.tar ${CUSTOM_SCORECARD_IMAGE}
 
       - name: Save container as artifact
-        uses: actions/upload-artifact@83fd05a356d7e2593de66fc9913b3002723633cb
+        uses: actions/upload-artifact@0b7f8abb1508181956e8e162db84b466c27e18ce
         with:
           name: volsync-custom-scorecard-tests-container
           path: /tmp/image.tar
@@ -354,7 +354,7 @@ jobs:
         run: make test-krew
 
       - name: Save cli as artifact
-        uses: actions/upload-artifact@83fd05a356d7e2593de66fc9913b3002723633cb
+        uses: actions/upload-artifact@0b7f8abb1508181956e8e162db84b466c27e18ce
         with:
           name: kubectl-volsync
           path: bin/kubectl-volsync
