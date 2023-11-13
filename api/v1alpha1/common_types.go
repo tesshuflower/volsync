@@ -33,6 +33,10 @@ limitations under the License.
 
 package v1alpha1
 
+import (
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+)
+
 // CopyMethodType defines the methods for creating point-in-time copies of
 // volumes.
 // +kubebuilder:validation:Enum=Direct;None;Clone;Snapshot
@@ -115,4 +119,19 @@ type CustomCASpec struct {
 
 	// The key within the Secret or ConfigMap containing the CA certificate
 	Key string `json:"key,omitempty"`
+}
+
+type SourcePVCGroup struct {
+	Selector metav1.LabelSelector `json:"selector,omitempty"`
+}
+
+// TODO: rename, perhaps move somewhere?
+/*
+type DestinationPVCGroup struct {
+	MemberPVCs []DestinationPVCGroupMember `json:"memberPVCs,omitempty"`
+}
+*/
+type DestinationPVCGroupMember struct {
+	Name string `json:"name"`
+	//TODO: size, spec stuff
 }

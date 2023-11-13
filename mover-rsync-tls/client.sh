@@ -8,12 +8,17 @@ if [[ -z "$DESTINATION_ADDRESS" ]]; then
     exit 1
 fi
 
+
 STUNNEL_CONF=/tmp/stunnel-client.conf
 STUNNEL_PID_FILE=/tmp/stunnel-client.pid
 PSK_FILE=/keys/psk.txt
 STUNNEL_LISTEN_PORT=9000
 SOURCE="/data"
 BLOCK_SOURCE="/dev/block"
+
+#IS_VOLUME_GROUP="${IS_VOLUME_GROUP:-0}"
+MAX_PARALLELISM="${MAX_PARALLELISM:-2}"
+PVC_LIST="${PVC_LIST:-${SOURCE}}"
 
 SCRIPT="$(realpath "$0")"
 SCRIPT_DIR="$(dirname "$SCRIPT")"
@@ -58,6 +63,33 @@ accept = 127.0.0.1:$STUNNEL_LISTEN_PORT
 ; We are the client
 client = yes
 connect = $DESTINATION_ADDRESS:$DESTINATION_PORT
+
+[rsync-8040]
+ciphers = PSK
+PSKsecrets = $PSK_FILE
+; Port to listen for incoming connection from rsync
+accept = 127.0.0.1:9040
+; We are the client
+client = yes
+connect = $DESTINATION_ADDRESS:8040
+
+[rsync-8041]
+ciphers = PSK
+PSKsecrets = $PSK_FILE
+; Port to listen for incoming connection from rsync
+accept = 127.0.0.1:9041
+; We are the client
+client = yes
+connect = $DESTINATION_ADDRESS:8041
+
+[rsync-8042]
+ciphers = PSK
+PSKsecrets = $PSK_FILE
+; Port to listen for incoming connection from rsync
+accept = 127.0.0.1:9042
+; We are the client
+client = yes
+connect = $DESTINATION_ADDRESS:8042
 STUNNEL_CONF
 
 ##############################
@@ -111,20 +143,47 @@ while [[ $rc -ne 0 && $RETRY -lt $MAX_RETRIES ]]; do
       /diskrsync-tcp $BLOCK_SOURCE --source --target-address 127.0.0.1 --port $STUNNEL_LISTEN_PORT
       rc=$?
     else
+        #PVC_LIST="${SOURCE}"
+        #if [[ ${IS_VOLUME_GROUP} -eq 1 ]]; then
+        #  PVC_LIST=$(ls "${SOURCE}")
+        #  echo "Copying volume group of pvcs: PVC_LIST=${PVC_LIST} ..."
+        #fi
+        echo "==============================="
+        echo "PVC_LIST: ${PVC_LIST} ..."
+        echo "MAX_PARALLELISM: ${MAX_PARALLELISM}"
+        echo "==============================="
+        echo ""
+
         shopt -s dotglob  # Make * include dotfiles
         if [[ -n "$(ls -A -- ${SOURCE}/*)" ]]; then
+            echo "###### First pass #####"
+            echo ""
+            ls -al ${SOURCE}
+
+            #FIXME: remove
+            echo "### SLEEPING ..."
+            sleep 20000
+            #FIXME: end remove
+
             # 1st run preserves as much as possible, but excludes the root directory
-            rsync -aAhHSxz --exclude=lost+found --itemize-changes --info=stats2,misc2 ${SOURCE}/* rsync://127.0.0.1:$STUNNEL_LISTEN_PORT/data
+            #rsync -aAhHSxz -vvv --exclude=lost+found --itemize-changes --info=stats2,misc2 ${SOURCE}/* rsync://127.0.0.1:$STUNNEL_LISTEN_PORT/data
+            ##rsync -aAhHSz --temp-dir=/tmp -vvv --exclude=lost+found --itemize-changes --info=stats2,misc2 ${SOURCE}/* rsync://127.0.0.1:$STUNNEL_LISTEN_PORT/data
+            ##rsync -aAhHSz --include=/data/pvc1/ --include=/data/pvc2/ -vvv --exclude=lost+found --itemize-changes --info=stats2,misc2 ${SOURCE}/* rsync://127.0.0.1:$STUNNEL_LISTEN_PORT/data
+            printf '%s' "${PVC_LIST}" | xargs -t -P"${MAX_PARALLELISM}" -d " " -I{} bash -c "set -e -o pipefail; shopt -s dotglob; rsync -aAhHSxz --exclude=lost+found --itemize-changes --info=stats2,misc2 {}/* rsync://127.0.0.1:$STUNNEL_LISTEN_PORT{} | sed -e 's|^|{}>\t|'"
         else
             echo "Skipping sync of empty source directory"
         fi
         rc_a=$?
         shopt -u dotglob  # Back to default * behavior
 
+        echo "###### Second pass (cleanup) #####"
         # To delete extra files, must sync at the directory-level, but need to avoid
         # trying to modify the directory itself. This pass will only delete files
         # that exist on the destination but not on the source, not make updates.
-        rsync -rx --exclude=lost+found --ignore-existing --ignore-non-existing --delete --itemize-changes --info=stats2,misc2 ${SOURCE}/ rsync://127.0.0.1:$STUNNEL_LISTEN_PORT/data
+        #rsync -rx -vvv --exclude=lost+found --ignore-existing --ignore-non-existing --delete --itemize-changes --info=stats2,misc2 ${SOURCE}/ rsync://127.0.0.1:$STUNNEL_LISTEN_PORT/data
+        ##rsync -r --temp-dir=/tmp -vvv --exclude=lost+found --ignore-existing --ignore-non-existing --delete --itemize-changes --info=stats2,misc2 ${SOURCE}/ rsync://127.0.0.1:$STUNNEL_LISTEN_PORT/data
+        ##rsync -r --include=/data/pvc1/ --include=/data/pvc2/ -vvv --exclude=lost+found --ignore-existing --ignore-non-existing --delete --itemize-changes --info=stats2,misc2 ${SOURCE}/ rsync://127.0.0.1:$STUNNEL_LISTEN_PORT/data
+        printf '%s' "${PVC_LIST}" | xargs -t -P"${MAX_PARALLELISM}" -d " " -I{} bash -c "set -e -o pipefail; rsync -rx --exclude=lost+found --ignore-existing --ignore-non-existing --delete --itemize-changes --info=stats2,misc2 {}/ rsync://127.0.0.1:$STUNNEL_LISTEN_PORT{} | sed -e 's|^|{}>\t|'"
         rc_b=$?
         rc=$(( rc_a * 100 + rc_b ))
     fi

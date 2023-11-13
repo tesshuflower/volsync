@@ -258,6 +258,8 @@ type ReplicationSourceSyncthingSpec struct {
 type ReplicationSourceSpec struct {
 	// sourcePVC is the name of the PersistentVolumeClaim (PVC) to replicate.
 	SourcePVC string `json:"sourcePVC,omitempty"`
+	// sourcePVCGroup
+	SourcePVCGroup *SourcePVCGroup `json:"sourcePVCGroup,omitempty"`
 	// trigger determines when the latest state of the volume will be captured
 	// (and potentially replicated to the destination).
 	//+optional
