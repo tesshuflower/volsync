@@ -37,6 +37,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // CopyMethodType defines the methods for creating point-in-time copies of
@@ -172,4 +173,19 @@ type MoverConfig struct {
 	MoverResources *corev1.ResourceRequirements `json:"moverResources,omitempty"`
 	// MoverAffinity allows specifying the PodAffinity that will be used by the data mover
 	MoverAffinity *corev1.Affinity `json:"moverAffinity,omitempty"`
+}
+
+type SourcePVCGroup struct {
+	Selector metav1.LabelSelector `json:"selector,omitempty"`
+}
+
+// TODO: rename, perhaps move somewhere?
+/*
+type DestinationPVCGroup struct {
+	MemberPVCs []DestinationPVCGroupMember `json:"memberPVCs,omitempty"`
+}
+*/
+type DestinationPVCGroupMember struct {
+	Name string `json:"name"`
+	//TODO: size, spec stuff
 }

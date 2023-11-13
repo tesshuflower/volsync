@@ -84,6 +84,9 @@ type ReplicationDestinationVolumeOptions struct {
 	// accessModes must be specified.
 	//+optional
 	DestinationPVC *string `json:"destinationPVC,omitempty"`
+	//TODO: doc
+	//+optional
+	DestinationPVCGroup []DestinationPVCGroupMember `json:"destinationPVCGroup,omitempty"`
 }
 
 type ReplicationDestinationRsyncSpec struct {

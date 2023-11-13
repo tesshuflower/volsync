@@ -22,6 +22,8 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"fmt"
+	"sort"
 	"strconv"
 	"time"
 
@@ -45,7 +47,7 @@ import (
 )
 
 const (
-	mountPath        = "/data"
+	baseMountPath    = "/data"
 	devicePath       = "/dev/block"
 	dataVolumeName   = "data"
 	tlsContainerPort = 8000
@@ -55,26 +57,28 @@ const (
 
 // Mover is the reconciliation logic for the Rsync-based data mover.
 type Mover struct {
-	client             client.Client
-	logger             logr.Logger
-	eventRecorder      events.EventRecorder
-	owner              client.Object
-	vh                 *volumehandler.VolumeHandler
-	saHandler          utils.SAHandler
-	containerImage     string
-	key                *string
-	serviceType        *corev1.ServiceType
-	serviceAnnotations map[string]string
-	address            *string
-	port               *int32
-	isSource           bool
-	paused             bool
-	mainPVCName        *string
-	privileged         bool
-	sourceStatus       *volsyncv1alpha1.ReplicationSourceRsyncTLSStatus
-	destStatus         *volsyncv1alpha1.ReplicationDestinationRsyncTLSStatus
-	latestMoverStatus  *volsyncv1alpha1.MoverStatus
-	moverConfig        volsyncv1alpha1.MoverConfig
+	client               client.Client
+	logger               logr.Logger
+	eventRecorder        events.EventRecorder
+	owner                client.Object
+	vh                   *volumehandler.VolumeHandler
+	saHandler            utils.SAHandler
+	containerImage       string
+	key                  *string
+	serviceType          *corev1.ServiceType
+	serviceAnnotations   map[string]string
+	address              *string
+	port                 *int32
+	isSource             bool
+	paused               bool
+	mainPVCName          *string
+	mainPVCGroupSelector *volsyncv1alpha1.SourcePVCGroup             //FIXME:
+	mainPVCGroup         []volsyncv1alpha1.DestinationPVCGroupMember //FIXME:
+	privileged           bool
+	sourceStatus         *volsyncv1alpha1.ReplicationSourceRsyncTLSStatus
+	destStatus           *volsyncv1alpha1.ReplicationDestinationRsyncTLSStatus
+	latestMoverStatus    *volsyncv1alpha1.MoverStatus
+	moverConfig          volsyncv1alpha1.MoverConfig
 }
 
 var _ mover.Mover = &Mover{}
@@ -94,14 +98,23 @@ func (m *Mover) Synchronize(ctx context.Context) (mover.Result, error) {
 
 	// Allocate temporary data PVC
 	var dataPVC *corev1.PersistentVolumeClaim
+	var dataPVCGroup *pvcGroup
 	if m.isSource {
-		dataPVC, err = m.ensureSourcePVC(ctx)
+		//dataPVC, err = m.ensureSourcePVCs(ctx)
+		dataPVCGroup, err = m.ensureSourcePVCs(ctx)
 	} else {
-		dataPVC, err = m.ensureDestinationPVC(ctx)
+		dataPVCGroup, err = m.ensureDestinationPVCs(ctx)
 	}
-	if dataPVC == nil || err != nil {
+	if dataPVCGroup == nil || err != nil {
 		return mover.InProgress(), err
 	}
+
+	//FIXME: remove - get rid of dataPVC and use dataPVCGroup instead?
+	for _, v := range dataPVCGroup.pvcs {
+		dataPVC = &v
+		break
+	}
+	//FIXME: end fixme
 
 	// Ensure service (if required) and publish the address in the status
 	cont, err := m.ensureServiceAndPublishAddress(ctx)
@@ -122,7 +135,7 @@ func (m *Mover) Synchronize(ctx context.Context) (mover.Result, error) {
 	}
 
 	// Ensure mover Job
-	job, err := m.ensureJob(ctx, dataPVC, sa, *rsyncPSKSecretName)
+	job, err := m.ensureJob(ctx, dataPVC, dataPVCGroup, sa, *rsyncPSKSecretName)
 	if job == nil || err != nil {
 		return mover.InProgress(), err
 	}
@@ -334,6 +347,84 @@ func (m *Mover) ensureSourcePVC(ctx context.Context) (*corev1.PersistentVolumeCl
 	return pvc, nil
 }
 
+// func (m *Mover) ensureSourcePVCs(ctx context.Context) (*corev1.PersistentVolumeClaim, error) {
+// TODO: can this be moved to the volumehandler?
+func (m *Mover) ensureSourcePVCs(ctx context.Context) (*pvcGroup, error) {
+	srcPVCGroup := pvcGroup{}
+
+	if m.mainPVCGroupSelector != nil {
+		srcPVCGroup.isVolumeGroup = true
+
+		/*
+			if m.mainPVCGroup.Selector == nil {
+				err := fmt.Errorf("unable to get source PVC - sourcePVC or sourcePVCGroupSelector must be specified")
+				m.logger.Error(err, "ensureSourcePVCs")
+				return nil, err
+			}
+		*/
+
+		//FIXME: temp workaround without volumegroup stuff
+		// 1. lookup PVCs by selector
+		pvcSelector, err := metav1.LabelSelectorAsSelector(&m.mainPVCGroupSelector.Selector)
+		if err != nil {
+			m.logger.Error(err, "Unable to parse pvc volume group selector")
+			return nil, err
+		}
+		listOptions := []client.ListOption{
+			client.MatchingLabelsSelector{
+				Selector: pvcSelector,
+			},
+			client.InNamespace(m.owner.GetNamespace()),
+		}
+		pvcGroupList := &corev1.PersistentVolumeClaimList{}
+		err = m.client.List(ctx, pvcGroupList, listOptions...)
+		if err != nil {
+			return nil, err
+		}
+
+		if len(pvcGroupList.Items) == 0 {
+			return nil, fmt.Errorf("No src PVCs found")
+		}
+
+		srcPVCGroup.pvcs = map[string]corev1.PersistentVolumeClaim{}
+
+		// 2. take individual snapshots (reusing vh code temporarily - will only work for CopyMode: Snapshot)
+		for i := range pvcGroupList.Items {
+			srcPVC := &pvcGroupList.Items[i]
+			dataName := mover.VolSyncPrefix + m.owner.GetName() + "-" + m.direction() + "-" + srcPVC.GetName()
+			pvcSnapshotted, err := m.vh.EnsurePVCFromSrc(ctx, m.logger, srcPVC, dataName, true)
+			if err != nil || pvcSnapshotted == nil {
+				//don't care if these are going to happen 1 at a time, will be replaced with volumesnapshot
+				return nil, err
+			}
+			srcPVCGroup.pvcs[srcPVC.GetName() /*original PVC name*/] = *pvcSnapshotted
+		}
+		//FIXME: end - should take a volumegroupsnapshot instead
+
+	} else {
+		srcPVCGroup.isVolumeGroup = false
+
+		srcPVC := &corev1.PersistentVolumeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      *m.mainPVCName,
+				Namespace: m.owner.GetNamespace(),
+			},
+		}
+		if err := m.client.Get(ctx, client.ObjectKeyFromObject(srcPVC), srcPVC); err != nil {
+			m.logger.Error(err, "unable to get source PVC", "PVC", client.ObjectKeyFromObject(srcPVC))
+			return nil, err
+		}
+		dataName := mover.VolSyncPrefix + m.owner.GetName() + "-" + m.direction()
+		pvc, err := m.vh.EnsurePVCFromSrc(ctx, m.logger, srcPVC, dataName, true)
+		if err != nil || pvc == nil {
+			return nil, err
+		}
+		srcPVCGroup.pvcs = map[string]corev1.PersistentVolumeClaim{"data": *pvc}
+	}
+
+	return &srcPVCGroup, nil
+}
+
 func (m *Mover) ensureDestinationPVC(ctx context.Context) (*corev1.PersistentVolumeClaim, error) {
 	isProvidedPVC, dataPVCName := m.getDestinationPVCName()
 	if isProvidedPVC {
@@ -341,6 +432,48 @@ func (m *Mover) ensureDestinationPVC(ctx context.Context) (*corev1.PersistentVol
 	}
 	// Need to allocate the incoming data volume
 	return m.vh.EnsureNewPVC(ctx, m.logger, dataPVCName)
+}
+
+// func (m *Mover) ensureDestinationPVC(ctx context.Context) (*corev1.PersistentVolumeClaim, error) {
+func (m *Mover) ensureDestinationPVCs(ctx context.Context) (*pvcGroup, error) {
+	dstPVCGroup := pvcGroup{}
+
+	if len(m.mainPVCGroup) > 0 {
+		// Volume Group case
+		dstPVCGroup.isVolumeGroup = true
+
+		dstPVCGroup.pvcs = map[string]corev1.PersistentVolumeClaim{}
+
+		for _, memberPVC := range m.mainPVCGroup {
+			// Need to allocate the incoming data volumes
+			pvc, err := m.vh.EnsureNewPVC(ctx, m.logger, memberPVC.Name /*The original src pvc name*/)
+			//FIXME: the above won't work if any pvcs have differing sizes or if they already exist.
+			//FIXME: this is just temporary to test out for the moment
+			if err != nil || pvc == nil {
+				return nil, err
+			}
+			dstPVCGroup.pvcs[memberPVC.Name] = *pvc
+		}
+	} else {
+		// Single PVC case
+		dstPVCGroup.isVolumeGroup = false
+
+		isProvidedPVC, dataPVCName := m.getDestinationPVCName()
+		if isProvidedPVC {
+			pvc, err := m.vh.UseProvidedPVC(ctx, dataPVCName)
+			if err != nil || pvc == nil {
+				return nil, err
+			}
+		}
+		// Need to allocate the incoming data volume
+		pvc, err := m.vh.EnsureNewPVC(ctx, m.logger, dataPVCName)
+		if err != nil || pvc == nil {
+			return nil, err
+		}
+		dstPVCGroup.pvcs = map[string]corev1.PersistentVolumeClaim{"data": *pvc}
+	}
+
+	return &dstPVCGroup, nil
 }
 
 func (m *Mover) getDestinationPVCName() (bool, string) {
@@ -353,6 +486,7 @@ func (m *Mover) getDestinationPVCName() (bool, string) {
 
 //nolint:funlen
 func (m *Mover) ensureJob(ctx context.Context, dataPVC *corev1.PersistentVolumeClaim,
+	dataPVCGroup *pvcGroup,
 	sa *corev1.ServiceAccount, rsyncSecretName string) (*batchv1.Job, error) {
 	job := &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
@@ -386,6 +520,21 @@ func (m *Mover) ensureJob(ctx context.Context, dataPVC *corev1.PersistentVolumeC
 		blockVolume := utils.PvcIsBlockMode(dataPVC)
 
 		containerEnv := []corev1.EnvVar{}
+
+		podSpec := &job.Spec.Template.Spec
+		podSpec.Containers = []corev1.Container{{
+			Name:  "rsync-tls",
+			Image: m.containerImage,
+			SecurityContext: &corev1.SecurityContext{
+				AllowPrivilegeEscalation: ptr.To(false),
+				Capabilities: &corev1.Capabilities{
+					Drop: []corev1.Capability{"ALL"},
+				},
+				Privileged:             ptr.To(false),
+				ReadOnlyRootFilesystem: ptr.To(true),
+			},
+		}}
+
 		containerCmd := []string{"/bin/bash", "-c", "/mover-rsync-tls/server.sh"} // cmd for replicationDestination job
 		if m.isSource {
 			// Set dest address/port if necessary
@@ -399,28 +548,47 @@ func (m *Mover) ensureJob(ctx context.Context, dataPVC *corev1.PersistentVolumeC
 			// Set container cmd for the replicationSource job
 			containerCmd = []string{"/bin/bash", "-c", "/mover-rsync-tls/client.sh"}
 
-			// Set read-only for volume in repl source job spec if the PVC only supports read-only
-			readOnlyVolume = utils.PvcIsReadOnly(dataPVC)
-		}
-		podSpec := &job.Spec.Template.Spec
-		podSpec.Containers = []corev1.Container{{
-			Name:    "rsync-tls",
-			Env:     containerEnv,
-			Command: containerCmd,
-			Image:   m.containerImage,
-			SecurityContext: &corev1.SecurityContext{
-				AllowPrivilegeEscalation: ptr.To(false),
-				Capabilities: &corev1.Capabilities{
-					Drop: []corev1.Capability{"ALL"},
+			/*
+				// Set read-only for volume in repl source job spec if the PVC only supports read-only
+				readOnlyVolume = utils.PvcIsReadOnly(dataPVC)
+			*/
+		} else {
+			// Set dest named port in container spec
+			podSpec.Containers[0].Ports = []corev1.ContainerPort{
+				{
+					Name:          m.owner.GetName(), //FIXME: change - just setting to RD name for now
+					ContainerPort: tlsContainerPort,
+					Protocol:      corev1.ProtocolTCP,
 				},
-				Privileged:             ptr.To(false),
-				ReadOnlyRootFilesystem: ptr.To(true),
-			},
-		}}
-		volumeMounts := []corev1.VolumeMount{}
-		if !blockVolume {
-			volumeMounts = append(volumeMounts, corev1.VolumeMount{Name: dataVolumeName, MountPath: mountPath})
+			}
 		}
+		podSpec.Containers[0].Command = containerCmd //FIXME: move this into the above if/else?
+
+		volumeMounts := []corev1.VolumeMount{}
+		pvcList := ""
+		if !blockVolume {
+			mountPath := baseMountPath // Default (for one pvc with no volume group) mount at /data
+			for _, origPVCName := range dataPVCGroup.GetPVCNamesSorted() {
+				if dataPVCGroup.isVolumeGroup {
+					// If we're doing a volume group, mount each pvc at path that contains the original pvc name
+					mountPath = baseMountPath + "/" + origPVCName
+
+					if pvcList == "" {
+						pvcList = mountPath
+					} else {
+						pvcList = pvcList + " " + mountPath
+					}
+				}
+				volumeMounts = append(volumeMounts, corev1.VolumeMount{Name: origPVCName, MountPath: mountPath})
+			}
+		}
+
+		// If VolumeGroup, append the pvc mount points to env var PVC_LIST
+		if pvcList != "" {
+			containerEnv = append(containerEnv, corev1.EnvVar{Name: "PVC_LIST", Value: pvcList})
+		}
+		podSpec.Containers[0].Env = containerEnv
+
 		volumeMounts = append(volumeMounts, corev1.VolumeMount{Name: "keys", MountPath: "/keys"},
 			corev1.VolumeMount{Name: "tempdir", MountPath: "/tmp"})
 		job.Spec.Template.Spec.Containers[0].VolumeMounts = volumeMounts
@@ -432,12 +600,14 @@ func (m *Mover) ensureJob(ctx context.Context, dataPVC *corev1.PersistentVolumeC
 		podSpec.RestartPolicy = corev1.RestartPolicyNever
 		podSpec.ServiceAccountName = sa.Name
 		podSpec.Volumes = []corev1.Volume{
-			{Name: dataVolumeName, VolumeSource: corev1.VolumeSource{
-				PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
-					ClaimName: dataPVC.Name,
-					ReadOnly:  readOnlyVolume,
-				}},
-			},
+			/*
+				{Name: dataVolumeName, VolumeSource: corev1.VolumeSource{
+					PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+						ClaimName: dataPVC.Name,
+						ReadOnly:  readOnlyVolume,
+					}},
+				},
+			*/
 			{Name: "keys", VolumeSource: corev1.VolumeSource{
 				Secret: &corev1.SecretVolumeSource{
 					SecretName:  rsyncSecretName,
@@ -450,6 +620,22 @@ func (m *Mover) ensureJob(ctx context.Context, dataPVC *corev1.PersistentVolumeC
 				}},
 			},
 		}
+
+		for _, origPVCName := range dataPVCGroup.GetPVCNamesSorted() {
+			dataPVCFromGroup := dataPVCGroup.GetPVCByName(origPVCName)
+
+			// Set read-only for volume in repl source job spec if the PVC only supports read-only
+			readOnlyVolume = utils.PvcIsReadOnly(&dataPVCFromGroup) // Should only be read only if src
+
+			podSpec.Volumes = append(podSpec.Volumes, corev1.Volume{
+				Name: origPVCName, VolumeSource: corev1.VolumeSource{
+					PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+						ClaimName: dataPVCFromGroup.Name,
+						ReadOnly:  readOnlyVolume,
+					}},
+			})
+		}
+
 		if m.vh.IsCopyMethodDirect() {
 			affinity, err := utils.AffinityFromVolume(ctx, m.client, logger, dataPVC)
 			if err != nil {
@@ -530,3 +716,57 @@ func (m *Mover) ensureJob(ctx context.Context, dataPVC *corev1.PersistentVolumeC
 	// We only continue reconciling if the rsync job has completed
 	return job, nil
 }
+
+// TODO: Move me
+type pvcGroup struct {
+	isVolumeGroup  bool
+	pvcs           map[string]corev1.PersistentVolumeClaim
+	pvcNamesSorted []string
+}
+
+func (pg *pvcGroup) GetPVCByName(pvcName string) corev1.PersistentVolumeClaim {
+	return pg.pvcs[pvcName]
+}
+
+func (pg *pvcGroup) GetPVCNamesSorted() []string {
+	if pg.pvcNamesSorted != nil {
+		// Assume we've already sorted
+		return pg.pvcNamesSorted
+	}
+
+	// Sort by name so we do not keep re-ordering Volumes/VolumeMounts
+	// (range over map keys will give us inconsistent sorting)
+	pg.pvcNamesSorted = make([]string, len(pg.pvcs))
+	i := 0
+	for key := range pg.pvcs {
+		pg.pvcNamesSorted[i] = key
+		i++
+	}
+	sort.Strings(pg.pvcNamesSorted)
+
+	return pg.pvcNamesSorted
+}
+
+/*
+func appendSortedPVCVolumeMounts(pvcGroup *pvcGroup, volumeMounts []corev1.VolumeMount) []corev1.VolumeMount {
+	// Sort by name so we do not keep re-ordering VolumeMounts (range over map keys will give us inconsistent sorting)
+	pvcNames := make([]string, len(pvcGroup.pvcs))
+	i := 0
+	for key := range pvcGroup.pvcs {
+		pvcNames[i] = key
+		i++
+	}
+	sort.Strings(pvcNames)
+
+	for _, pvcName := range pvcNames {
+		mountPath := baseMountPath // Default (for one pvc with no volume group) mount at /data
+		if pvcGroup.isVolumeGroup {
+			// If we're doing a volume group, mount each pvc at path that contains the original pvc name
+			mountPath = baseMountPath + "/" + pvcName
+		}
+		volumeMounts = append(volumeMounts, corev1.VolumeMount{Name: pvcName, MountPath: mountPath})
+	}
+
+	return volumeMounts
+}
+*/
