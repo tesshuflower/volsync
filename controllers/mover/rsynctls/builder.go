@@ -104,6 +104,10 @@ func (rb *Builder) FromSource(client client.Client, logger logr.Logger,
 		source.Status.LatestMoverStatus = &volsyncv1alpha1.MoverStatus{}
 	}
 
+	if source.Status.LatestVolumeGroupMoverStatus == nil {
+		source.Status.LatestVolumeGroupMoverStatus = map[string]*volsyncv1alpha1.MoverStatus{}
+	}
+
 	vh, err := volumehandler.NewVolumeHandler(
 		volumehandler.WithClient(client),
 		volumehandler.WithRecorder(eventRecorder),
@@ -120,26 +124,27 @@ func (rb *Builder) FromSource(client client.Client, logger logr.Logger,
 		source.Spec.RsyncTLS.MoverServiceAccount)
 
 	return &Mover{
-		client:               client,
-		logger:               logger.WithValues("method", "RsyncTLS"),
-		eventRecorder:        eventRecorder,
-		owner:                source,
-		vh:                   vh,
-		saHandler:            saHandler,
-		containerImage:       rb.getRsyncTLSContainerImage(),
-		key:                  source.Spec.RsyncTLS.KeySecret,
-		serviceType:          nil,
-		serviceAnnotations:   nil,
-		address:              source.Spec.RsyncTLS.Address,
-		port:                 source.Spec.RsyncTLS.Port,
-		isSource:             isSource,
-		paused:               source.Spec.Paused,
-		mainPVCName:          &source.Spec.SourcePVC,
-		mainPVCGroupSelector: source.Spec.SourcePVCGroup,
-		privileged:           privileged,
-		moverSecurityContext: source.Spec.RsyncTLS.MoverSecurityContext,
-		sourceStatus:         source.Status.RsyncTLS,
-		latestMoverStatus:    source.Status.LatestMoverStatus,
+		client:                       client,
+		logger:                       logger.WithValues("method", "RsyncTLS"),
+		eventRecorder:                eventRecorder,
+		owner:                        source,
+		vh:                           vh,
+		saHandler:                    saHandler,
+		containerImage:               rb.getRsyncTLSContainerImage(),
+		key:                          source.Spec.RsyncTLS.KeySecret,
+		serviceType:                  nil,
+		serviceAnnotations:           nil,
+		address:                      source.Spec.RsyncTLS.Address,
+		port:                         source.Spec.RsyncTLS.Port,
+		isSource:                     isSource,
+		paused:                       source.Spec.Paused,
+		mainPVCName:                  &source.Spec.SourcePVC,
+		mainPVCGroupSelector:         source.Spec.SourcePVCGroup,
+		privileged:                   privileged,
+		moverSecurityContext:         source.Spec.RsyncTLS.MoverSecurityContext,
+		sourceStatus:                 source.Status.RsyncTLS,
+		latestMoverStatus:            source.Status.LatestMoverStatus,
+		latestVolumeGroupMoverStatus: source.Status.LatestVolumeGroupMoverStatus,
 	}, nil
 }
 
@@ -158,6 +163,10 @@ func (rb *Builder) FromDestination(client client.Client, logger logr.Logger,
 
 	if destination.Status.LatestMoverStatus == nil {
 		destination.Status.LatestMoverStatus = &volsyncv1alpha1.MoverStatus{}
+	}
+
+	if destination.Status.LatestVolumeGroupMoverStatus == nil {
+		destination.Status.LatestVolumeGroupMoverStatus = map[string]*volsyncv1alpha1.MoverStatus{}
 	}
 
 	vh, err := volumehandler.NewVolumeHandler(
@@ -184,25 +193,26 @@ func (rb *Builder) FromDestination(client client.Client, logger logr.Logger,
 	}
 
 	return &Mover{
-		client:               client,
-		logger:               logger.WithValues("method", "RsyncTLS"),
-		eventRecorder:        eventRecorder,
-		owner:                destination,
-		vh:                   vh,
-		saHandler:            saHandler,
-		containerImage:       rb.getRsyncTLSContainerImage(),
-		key:                  destination.Spec.RsyncTLS.KeySecret,
-		serviceType:          destination.Spec.RsyncTLS.ServiceType,
-		serviceAnnotations:   svcAnnotations,
-		address:              nil,
-		port:                 nil,
-		isSource:             isSource,
-		paused:               destination.Spec.Paused,
-		mainPVCName:          destination.Spec.RsyncTLS.DestinationPVC,
-		mainPVCGroup:         destination.Spec.RsyncTLS.DestinationPVCGroup,
-		privileged:           privileged,
-		moverSecurityContext: destination.Spec.RsyncTLS.MoverSecurityContext,
-		destStatus:           destination.Status.RsyncTLS,
-		latestMoverStatus:    destination.Status.LatestMoverStatus,
+		client:                       client,
+		logger:                       logger.WithValues("method", "RsyncTLS"),
+		eventRecorder:                eventRecorder,
+		owner:                        destination,
+		vh:                           vh,
+		saHandler:                    saHandler,
+		containerImage:               rb.getRsyncTLSContainerImage(),
+		key:                          destination.Spec.RsyncTLS.KeySecret,
+		serviceType:                  destination.Spec.RsyncTLS.ServiceType,
+		serviceAnnotations:           svcAnnotations,
+		address:                      nil,
+		port:                         nil,
+		isSource:                     isSource,
+		paused:                       destination.Spec.Paused,
+		mainPVCName:                  destination.Spec.RsyncTLS.DestinationPVC,
+		mainPVCGroup:                 destination.Spec.RsyncTLS.DestinationPVCGroup,
+		privileged:                   privileged,
+		moverSecurityContext:         destination.Spec.RsyncTLS.MoverSecurityContext,
+		destStatus:                   destination.Status.RsyncTLS,
+		latestMoverStatus:            destination.Status.LatestMoverStatus,
+		latestVolumeGroupMoverStatus: destination.Status.LatestVolumeGroupMoverStatus,
 	}, nil
 }

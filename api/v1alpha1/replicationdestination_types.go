@@ -268,6 +268,9 @@ type ReplicationDestinationStatus struct {
 	// Logs/Summary from latest mover job
 	//+optional
 	LatestMoverStatus *MoverStatus `json:"latestMoverStatus,omitempty"`
+	// Logs/Summary for each mover job (one job per pvc in a volume group)
+	//+optional
+	LatestVolumeGroupMoverStatus map[string]*MoverStatus `json:"latestVolumeGroupMoverStatus,omitempty"`
 	// rsync contains status information for Rsync-based replication.
 	Rsync *ReplicationDestinationRsyncStatus `json:"rsync,omitempty"`
 	// rsyncTLS contains status information for Rsync-based replication over TLS.

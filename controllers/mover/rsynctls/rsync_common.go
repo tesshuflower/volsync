@@ -31,14 +31,21 @@ import (
 )
 
 type rsyncSvcDescription struct {
-	Context     context.Context
-	Client      client.Client
-	Service     *corev1.Service
-	Owner       metav1.Object
-	Type        *corev1.ServiceType
-	Selector    map[string]string
-	Port        *int32
-	Annotations map[string]string
+	Context          context.Context
+	Client           client.Client
+	Service          *corev1.Service
+	Owner            metav1.Object
+	Type             *corev1.ServiceType
+	Selector         map[string]string
+	Port             *int32
+	NamedTargetPorts []namedTargetPort
+	Annotations      map[string]string
+}
+
+type namedTargetPort struct {
+	port           int32
+	portName       string
+	targetPortName string
 }
 
 func (d *rsyncSvcDescription) Reconcile(l logr.Logger) error {
@@ -62,8 +69,11 @@ func (d *rsyncSvcDescription) Reconcile(l logr.Logger) error {
 			d.Service.Spec.Type = corev1.ServiceTypeClusterIP
 		}
 		d.Service.Spec.Selector = d.Selector
-		if len(d.Service.Spec.Ports) != 1 {
-			d.Service.Spec.Ports = []corev1.ServicePort{{}}
+
+		totalPorts := 1 + len(d.NamedTargetPorts)
+
+		if len(d.Service.Spec.Ports) != totalPorts {
+			d.Service.Spec.Ports = make([]corev1.ServicePort, totalPorts)
 		}
 		d.Service.Spec.Ports[0].Name = "rsync-tls"
 		if d.Port != nil {
@@ -76,6 +86,21 @@ func (d *rsyncSvcDescription) Reconcile(l logr.Logger) error {
 		if d.Service.Spec.Type == corev1.ServiceTypeClusterIP {
 			d.Service.Spec.Ports[0].NodePort = 0
 		}
+
+		// Assume NamedTargetPorts are in the same order each time
+		for i := range d.NamedTargetPorts {
+			nTargetPort := d.NamedTargetPorts[i]
+			i++
+
+			d.Service.Spec.Ports[i].Name = nTargetPort.portName
+			d.Service.Spec.Ports[i].Port = nTargetPort.port
+			d.Service.Spec.Ports[i].Protocol = corev1.ProtocolTCP
+			d.Service.Spec.Ports[i].TargetPort = intstr.FromString(nTargetPort.targetPortName)
+			if d.Service.Spec.Type == corev1.ServiceTypeClusterIP {
+				d.Service.Spec.Ports[i].NodePort = 0
+			}
+		}
+
 		return nil
 	})
 	if err != nil {
