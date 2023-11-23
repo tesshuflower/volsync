@@ -57,28 +57,29 @@ const (
 
 // Mover is the reconciliation logic for the Rsync-based data mover.
 type Mover struct {
-	client               client.Client
-	logger               logr.Logger
-	eventRecorder        events.EventRecorder
-	owner                client.Object
-	vh                   *volumehandler.VolumeHandler
-	saHandler            utils.SAHandler
-	containerImage       string
-	key                  *string
-	serviceType          *corev1.ServiceType
-	serviceAnnotations   map[string]string
-	address              *string
-	port                 *int32
-	isSource             bool
-	paused               bool
-	mainPVCName          *string
-	mainPVCGroupSelector *volsyncv1alpha1.SourcePVCGroup             //FIXME:
-	mainPVCGroup         []volsyncv1alpha1.DestinationPVCGroupMember //FIXME:
-	privileged           bool
-	sourceStatus         *volsyncv1alpha1.ReplicationSourceRsyncTLSStatus
-	destStatus           *volsyncv1alpha1.ReplicationDestinationRsyncTLSStatus
-	latestMoverStatus    *volsyncv1alpha1.MoverStatus
-	moverConfig          volsyncv1alpha1.MoverConfig
+	client                       client.Client
+	logger                       logr.Logger
+	eventRecorder                events.EventRecorder
+	owner                        client.Object
+	vh                           *volumehandler.VolumeHandler
+	saHandler                    utils.SAHandler
+	containerImage               string
+	key                          *string
+	serviceType                  *corev1.ServiceType
+	serviceAnnotations           map[string]string
+	address                      *string
+	port                         *int32
+	isSource                     bool
+	paused                       bool
+	mainPVCName                  *string
+	mainPVCGroupSelector         *volsyncv1alpha1.SourcePVCGroup             //FIXME:
+	mainPVCGroup                 []volsyncv1alpha1.DestinationPVCGroupMember //FIXME:
+	privileged                   bool
+	sourceStatus                 *volsyncv1alpha1.ReplicationSourceRsyncTLSStatus
+	destStatus                   *volsyncv1alpha1.ReplicationDestinationRsyncTLSStatus
+	latestMoverStatus            *volsyncv1alpha1.MoverStatus
+	latestVolumeGroupMoverStatus map[string]*volsyncv1alpha1.MoverStatus
+	moverConfig                  volsyncv1alpha1.MoverConfig
 }
 
 var _ mover.Mover = &Mover{}
@@ -97,7 +98,7 @@ func (m *Mover) Synchronize(ctx context.Context) (mover.Result, error) {
 	var err error
 
 	// Allocate temporary data PVC
-	var dataPVC *corev1.PersistentVolumeClaim
+	//var dataPVC *corev1.PersistentVolumeClaim
 	var dataPVCGroup *pvcGroup
 	if m.isSource {
 		//dataPVC, err = m.ensureSourcePVCs(ctx)
@@ -109,15 +110,10 @@ func (m *Mover) Synchronize(ctx context.Context) (mover.Result, error) {
 		return mover.InProgress(), err
 	}
 
-	//FIXME: remove - get rid of dataPVC and use dataPVCGroup instead?
-	for _, v := range dataPVCGroup.pvcs {
-		dataPVC = &v
-		break
-	}
-	//FIXME: end fixme
+	pvcNamesSorted := dataPVCGroup.GetPVCNamesSorted()
 
 	// Ensure service (if required) and publish the address in the status
-	cont, err := m.ensureServiceAndPublishAddress(ctx)
+	cont, namedTargetPortsMapping, err := m.ensureServiceAndPublishAddress(ctx, dataPVCGroup)
 	if !cont || err != nil {
 		return mover.InProgress(), err
 	}
@@ -134,14 +130,37 @@ func (m *Mover) Synchronize(ctx context.Context) (mover.Result, error) {
 		return mover.InProgress(), err
 	}
 
-	// Ensure mover Job
-	job, err := m.ensureJob(ctx, dataPVC, dataPVCGroup, sa, *rsyncPSKSecretName)
-	if job == nil || err != nil {
-		return mover.InProgress(), err
+	// Ensure mover Jobs
+	jobs := map[string]*batchv1.Job{}
+	for i, pvcName := range pvcNamesSorted {
+		jobName := volSyncRsyncTLSPrefix + m.direction() + "-" + m.owner.GetName() + "-" + strconv.Itoa(i)
+		job, err := m.ensureJob(ctx, jobName, dataPVCGroup.GetPVCByName(pvcName), pvcName, /* original pvc name from the src */
+			len(pvcNamesSorted) /*pvcCount*/, namedTargetPortsMapping, sa, *rsyncPSKSecretName)
+		if err != nil {
+			return mover.InProgress(), err
+		}
+		jobs[pvcName] = job
+	}
+
+	// After scheduling all the jobs, make sure they are non-nil (this means they have completed)
+	for pvcName := range jobs {
+		job := jobs[pvcName]
+		if job == nil { // Job has not completed
+			return mover.InProgress(), nil
+		}
 	}
 
 	// On the destination, preserve the image and return it
 	if !m.isSource {
+		//FIXME: remove - Take 1 volumegroup backup once Vgroups are available
+		//FIXME: May need to ensure that the label selector is properly applied to the PVCs
+		var dataPVC *corev1.PersistentVolumeClaim
+		for _, v := range dataPVCGroup.pvcs {
+			dataPVC = v
+			break
+		}
+		//FIXME: end fixme
+
 		image, err := m.vh.EnsureImage(ctx, m.logger, dataPVC)
 		if image == nil || err != nil {
 			return mover.InProgress(), err
@@ -153,10 +172,28 @@ func (m *Mover) Synchronize(ctx context.Context) (mover.Result, error) {
 	return mover.Complete(), nil
 }
 
-func (m *Mover) ensureServiceAndPublishAddress(ctx context.Context) (bool, error) {
+func (m *Mover) ensureServiceAndPublishAddress(ctx context.Context, pvcGroup *pvcGroup) (bool, string, error) {
 	if m.address != nil || m.isSource {
 		// Connection will be outbound. Don't need a Service
-		return true, nil
+		return true, "", nil
+	}
+
+	var namedTargetPortsMapping string
+	var namedTargetPorts []namedTargetPort
+
+	if pvcGroup.isVolumeGroup {
+		namedTargetPorts = []namedTargetPort{}
+		for _, pvcName := range pvcGroup.GetPVCNamesSorted() {
+			port := pvcGroup.GetDestinationPort(pvcName)
+
+			namedTargetPorts = append(namedTargetPorts, namedTargetPort{
+				port:           port,
+				portName:       "rsync-tls-" + pvcName,
+				targetPortName: pvcName,
+			})
+
+			namedTargetPortsMapping = namedTargetPortsMapping + ">" + pvcName + " " + strconv.Itoa(int(port)) + "\n"
+		}
 	}
 
 	service := &corev1.Service{
@@ -166,21 +203,23 @@ func (m *Mover) ensureServiceAndPublishAddress(ctx context.Context) (bool, error
 		},
 	}
 	svcDesc := rsyncSvcDescription{
-		Context:     ctx,
-		Client:      m.client,
-		Service:     service,
-		Owner:       m.owner,
-		Type:        m.serviceType,
-		Selector:    m.serviceSelector(),
-		Port:        m.port,
-		Annotations: m.serviceAnnotations,
+		Context:          ctx,
+		Client:           m.client,
+		Service:          service,
+		Owner:            m.owner,
+		Type:             m.serviceType,
+		Selector:         m.serviceSelector(),
+		Port:             m.port,
+		NamedTargetPorts: namedTargetPorts,
+		Annotations:      m.serviceAnnotations,
 	}
 	err := svcDesc.Reconcile(m.logger)
 	if err != nil {
-		return false, err
+		return false, namedTargetPortsMapping, err
 	}
 
-	return m.publishSvcAddress(service)
+	a, err := m.publishSvcAddress(service)
+	return a, namedTargetPortsMapping, err
 }
 
 func (m *Mover) publishSvcAddress(service *corev1.Service) (bool, error) {
@@ -386,7 +425,7 @@ func (m *Mover) ensureSourcePVCs(ctx context.Context) (*pvcGroup, error) {
 			return nil, fmt.Errorf("No src PVCs found")
 		}
 
-		srcPVCGroup.pvcs = map[string]corev1.PersistentVolumeClaim{}
+		srcPVCGroup.pvcs = map[string]*corev1.PersistentVolumeClaim{}
 
 		// 2. take individual snapshots (reusing vh code temporarily - will only work for CopyMode: Snapshot)
 		for i := range pvcGroupList.Items {
@@ -397,7 +436,7 @@ func (m *Mover) ensureSourcePVCs(ctx context.Context) (*pvcGroup, error) {
 				//don't care if these are going to happen 1 at a time, will be replaced with volumesnapshot
 				return nil, err
 			}
-			srcPVCGroup.pvcs[srcPVC.GetName() /*original PVC name*/] = *pvcSnapshotted
+			srcPVCGroup.pvcs[srcPVC.GetName() /*original PVC name*/] = pvcSnapshotted
 		}
 		//FIXME: end - should take a volumegroupsnapshot instead
 
@@ -419,7 +458,7 @@ func (m *Mover) ensureSourcePVCs(ctx context.Context) (*pvcGroup, error) {
 		if err != nil || pvc == nil {
 			return nil, err
 		}
-		srcPVCGroup.pvcs = map[string]corev1.PersistentVolumeClaim{"data": *pvc}
+		srcPVCGroup.pvcs = map[string]*corev1.PersistentVolumeClaim{"data": pvc}
 	}
 
 	return &srcPVCGroup, nil
@@ -442,17 +481,21 @@ func (m *Mover) ensureDestinationPVCs(ctx context.Context) (*pvcGroup, error) {
 		// Volume Group case
 		dstPVCGroup.isVolumeGroup = true
 
-		dstPVCGroup.pvcs = map[string]corev1.PersistentVolumeClaim{}
+		dstPVCGroup.pvcs = map[string]*corev1.PersistentVolumeClaim{}
 
 		for _, memberPVC := range m.mainPVCGroup {
 			// Need to allocate the incoming data volumes
-			pvc, err := m.vh.EnsureNewPVC(ctx, m.logger, memberPVC.Name /*The original src pvc name*/)
+			newPVCName := memberPVC.TempPVCName
+			if newPVCName == "" {
+				newPVCName = memberPVC.Name // Will match the original PVC name from the src in this case
+			}
+			newPVC, err := m.vh.EnsureNewPVC(ctx, m.logger, newPVCName)
 			//FIXME: the above won't work if any pvcs have differing sizes or if they already exist.
 			//FIXME: this is just temporary to test out for the moment
-			if err != nil || pvc == nil {
+			if err != nil || newPVC == nil {
 				return nil, err
 			}
-			dstPVCGroup.pvcs[memberPVC.Name] = *pvc
+			dstPVCGroup.pvcs[memberPVC.Name /*The original src pvc name*/] = newPVC
 		}
 	} else {
 		// Single PVC case
@@ -470,7 +513,7 @@ func (m *Mover) ensureDestinationPVCs(ctx context.Context) (*pvcGroup, error) {
 		if err != nil || pvc == nil {
 			return nil, err
 		}
-		dstPVCGroup.pvcs = map[string]corev1.PersistentVolumeClaim{"data": *pvc}
+		dstPVCGroup.pvcs = map[string]*corev1.PersistentVolumeClaim{"data": pvc}
 	}
 
 	return &dstPVCGroup, nil
@@ -485,12 +528,12 @@ func (m *Mover) getDestinationPVCName() (bool, string) {
 }
 
 //nolint:funlen
-func (m *Mover) ensureJob(ctx context.Context, dataPVC *corev1.PersistentVolumeClaim,
-	dataPVCGroup *pvcGroup,
+func (m *Mover) ensureJob(ctx context.Context, jobName string, dataPVC *corev1.PersistentVolumeClaim,
+	origPVCName string, pvcCount int, namedTargetPortsMapping string,
 	sa *corev1.ServiceAccount, rsyncSecretName string) (*batchv1.Job, error) {
 	job := &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      volSyncRsyncTLSPrefix + m.direction() + "-" + m.owner.GetName(),
+			Name:      jobName,
 			Namespace: m.owner.GetNamespace(),
 		},
 	}
@@ -548,45 +591,36 @@ func (m *Mover) ensureJob(ctx context.Context, dataPVC *corev1.PersistentVolumeC
 			// Set container cmd for the replicationSource job
 			containerCmd = []string{"/bin/bash", "-c", "/mover-rsync-tls/client.sh"}
 
-			/*
-				// Set read-only for volume in repl source job spec if the PVC only supports read-only
-				readOnlyVolume = utils.PvcIsReadOnly(dataPVC)
-			*/
+			// Set read-only for volume in repl source job spec if the PVC only supports read-only
+			readOnlyVolume = utils.PvcIsReadOnly(dataPVC)
 		} else {
-			// Set dest named port in container spec
+			// Set dest named port in container spec to match the origPVCName
 			podSpec.Containers[0].Ports = []corev1.ContainerPort{
 				{
-					Name:          m.owner.GetName(), //FIXME: change - just setting to RD name for now
+					Name:          origPVCName,
 					ContainerPort: tlsContainerPort,
 					Protocol:      corev1.ProtocolTCP,
 				},
 			}
+
+			// Set env var for dest to contain pvc to ports mapping
+			containerEnv = append(containerEnv, corev1.EnvVar{Name: "PVC_PORTS", Value: namedTargetPortsMapping})
 		}
 		podSpec.Containers[0].Command = containerCmd //FIXME: move this into the above if/else?
 
 		volumeMounts := []corev1.VolumeMount{}
-		pvcList := ""
+		//pvcList := ""
 		if !blockVolume {
 			mountPath := baseMountPath // Default (for one pvc with no volume group) mount at /data
-			for _, origPVCName := range dataPVCGroup.GetPVCNamesSorted() {
-				if dataPVCGroup.isVolumeGroup {
-					// If we're doing a volume group, mount each pvc at path that contains the original pvc name
-					mountPath = baseMountPath + "/" + origPVCName
-
-					if pvcList == "" {
-						pvcList = mountPath
-					} else {
-						pvcList = pvcList + " " + mountPath
-					}
-				}
-				volumeMounts = append(volumeMounts, corev1.VolumeMount{Name: origPVCName, MountPath: mountPath})
+			if pvcCount > 1 {          // Part of a volume group - mount at /data/<pvcName>
+				mountPath = mountPath + "/" + origPVCName
+				//TODO: do this for block too (outside if statement)
+				containerEnv = append(containerEnv, corev1.EnvVar{Name: "PVC_NAME", Value: origPVCName})
+				containerEnv = append(containerEnv, corev1.EnvVar{Name: "PVC_COUNT", Value: strconv.Itoa(pvcCount)})
 			}
+			volumeMounts = append(volumeMounts, corev1.VolumeMount{Name: dataVolumeName, MountPath: mountPath})
 		}
 
-		// If VolumeGroup, append the pvc mount points to env var PVC_LIST
-		if pvcList != "" {
-			containerEnv = append(containerEnv, corev1.EnvVar{Name: "PVC_LIST", Value: pvcList})
-		}
 		podSpec.Containers[0].Env = containerEnv
 
 		volumeMounts = append(volumeMounts, corev1.VolumeMount{Name: "keys", MountPath: "/keys"},
@@ -600,14 +634,12 @@ func (m *Mover) ensureJob(ctx context.Context, dataPVC *corev1.PersistentVolumeC
 		podSpec.RestartPolicy = corev1.RestartPolicyNever
 		podSpec.ServiceAccountName = sa.Name
 		podSpec.Volumes = []corev1.Volume{
-			/*
-				{Name: dataVolumeName, VolumeSource: corev1.VolumeSource{
-					PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
-						ClaimName: dataPVC.Name,
-						ReadOnly:  readOnlyVolume,
-					}},
-				},
-			*/
+			{Name: dataVolumeName, VolumeSource: corev1.VolumeSource{
+				PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+					ClaimName: dataPVC.Name,
+					ReadOnly:  readOnlyVolume,
+				}},
+			},
 			{Name: "keys", VolumeSource: corev1.VolumeSource{
 				Secret: &corev1.SecretVolumeSource{
 					SecretName:  rsyncSecretName,
@@ -619,21 +651,6 @@ func (m *Mover) ensureJob(ctx context.Context, dataPVC *corev1.PersistentVolumeC
 					Medium: corev1.StorageMediumMemory,
 				}},
 			},
-		}
-
-		for _, origPVCName := range dataPVCGroup.GetPVCNamesSorted() {
-			dataPVCFromGroup := dataPVCGroup.GetPVCByName(origPVCName)
-
-			// Set read-only for volume in repl source job spec if the PVC only supports read-only
-			readOnlyVolume = utils.PvcIsReadOnly(&dataPVCFromGroup) // Should only be read only if src
-
-			podSpec.Volumes = append(podSpec.Volumes, corev1.Volume{
-				Name: origPVCName, VolumeSource: corev1.VolumeSource{
-					PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
-						ClaimName: dataPVCFromGroup.Name,
-						ReadOnly:  readOnlyVolume,
-					}},
-			})
 		}
 
 		if m.vh.IsCopyMethodDirect() {
@@ -710,7 +727,16 @@ func (m *Mover) ensureJob(ctx context.Context, dataPVC *corev1.PersistentVolumeC
 	logger.Info("job completed")
 
 	// update status with mover logs from successful job
-	utils.UpdateMoverStatusForSuccessfulJob(ctx, m.logger, m.latestMoverStatus, job.GetName(), job.GetNamespace(),
+	moverStatusToUpdate := m.latestMoverStatus
+	if pvcCount > 1 {
+		// VolumeGroup scenario - update the mover status for this particular pvc
+		_, ok := m.latestVolumeGroupMoverStatus[origPVCName]
+		if !ok {
+			m.latestVolumeGroupMoverStatus[origPVCName] = &volsyncv1alpha1.MoverStatus{}
+		}
+		moverStatusToUpdate = m.latestVolumeGroupMoverStatus[origPVCName]
+	}
+	utils.UpdateMoverStatusForSuccessfulJob(ctx, m.logger, moverStatusToUpdate, job.GetName(), job.GetNamespace(),
 		LogLineFilterSuccess)
 
 	// We only continue reconciling if the rsync job has completed
@@ -720,11 +746,12 @@ func (m *Mover) ensureJob(ctx context.Context, dataPVC *corev1.PersistentVolumeC
 // TODO: Move me
 type pvcGroup struct {
 	isVolumeGroup  bool
-	pvcs           map[string]corev1.PersistentVolumeClaim
+	pvcs           map[string]*corev1.PersistentVolumeClaim
 	pvcNamesSorted []string
+	pvcPorts       map[string]int32
 }
 
-func (pg *pvcGroup) GetPVCByName(pvcName string) corev1.PersistentVolumeClaim {
+func (pg *pvcGroup) GetPVCByName(pvcName string) *corev1.PersistentVolumeClaim {
 	return pg.pvcs[pvcName]
 }
 
@@ -745,6 +772,19 @@ func (pg *pvcGroup) GetPVCNamesSorted() []string {
 	sort.Strings(pg.pvcNamesSorted)
 
 	return pg.pvcNamesSorted
+}
+
+func (pg *pvcGroup) GetDestinationPort(pvcName string) int32 {
+	if pg.pvcPorts == nil {
+		pg.pvcPorts = map[string]int32{}
+
+		pvcNamesSorted := pg.GetPVCNamesSorted()
+		for i, pvcName := range pvcNamesSorted {
+			pg.pvcPorts[pvcName] = int32(tlsContainerPort + 1 + i)
+		}
+	}
+
+	return pg.pvcPorts[pvcName]
 }
 
 /*

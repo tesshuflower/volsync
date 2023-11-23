@@ -4,6 +4,7 @@ set -e -o pipefail
 
 RSYNC_PID_FILE=/tmp/rsyncd.pid
 CONTROL_FILE=/tmp/control/complete
+PVC_PORTS_FILE=/tmp/control/pvc-ports
 RSYNCD_CONF=/tmp/rsyncd.conf
 STUNNEL_CONF=/tmp/stunnel.conf
 STUNNEL_PID_FILE=/tmp/stunnel.pid
@@ -51,6 +52,11 @@ if [[ $DEBUG_MOVER -eq 1 && "$SCRIPT_DIR" != "/tmp" ]]; then
   exit 0
 fi
 
+PRIVILEGED_MOVER="${PRIVILEGED_MOVER:-1}"
+PVC_NAME="${PVC_NAME:-}"
+PVC_PORTS="${PVC_PORTS:-}"
+
+SCRIPT_DIR="$(dirname "$(realpath "$0")")"
 cd "$SCRIPT_DIR"
 
 STUNNEL_LISTEN_PORT=:::8000
@@ -78,6 +84,13 @@ if [[ -d $TARGET ]]; then
     echo "Destination PVC volumeMode is filesystem"
 
     mkdir -p "$(dirname "$CONTROL_FILE")"
+
+    echo "=== PVC_NAME: ${PVC_NAME}"
+    echo "=== PVC_PORTS:"
+    echo -e "${PVC_PORTS}"
+    echo "==="
+    # Save pvc_ports file
+    echo -e "${PVC_PORTS}" > "${PVC_PORTS_FILE}"
 
     ##############################
     ## Set up rsync config

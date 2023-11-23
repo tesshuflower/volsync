@@ -186,6 +186,10 @@ type DestinationPVCGroup struct {
 }
 */
 type DestinationPVCGroupMember struct {
+	// Name of the original PVC in the volume group being replicated to this destination
 	Name string `json:"name"`
+	// Name the replicationdestination should use for its PVC to replicate into - if not specified, Name will be used.
+	//+optional
+	TempPVCName string `json:"tempPVCName,omitempty"` //TODO: rename field?
 	//TODO: size, spec stuff
 }

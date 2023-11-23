@@ -2695,6 +2695,26 @@ spec:
                       automatically provisioning one. Either this field or both capacity and
                       accessModes must be specified.
                     type: string
+                  destinationPVCGroup:
+                    description: 'TODO: doc'
+                    items:
+                      description: "TODO: rename, perhaps move somewhere? \n type
+                        DestinationPVCGroup struct { MemberPVCs []DestinationPVCGroupMember
+                        `json:\"memberPVCs,omitempty\"` }"
+                      properties:
+                        name:
+                          description: Name of the original PVC in the volume group
+                            being replicated to this destination
+                          type: string
+                        tempPVCName:
+                          description: Name the replicationdestination should use
+                            for its PVC to replicate into - if not specified, Name
+                            will be used.
+                          type: string
+                      required:
+                      - name
+                      type: object
+                    type: array
                   moverPodLabels:
                     additionalProperties:
                       type: string
@@ -2856,6 +2876,13 @@ spec:
                         `json:\"memberPVCs,omitempty\"` }"
                       properties:
                         name:
+                          description: Name of the original PVC in the volume group
+                            being replicated to this destination
+                          type: string
+                        tempPVCName:
+                          description: Name the replicationdestination should use
+                            for its PVC to replicate into - if not specified, Name
+                            will be used.
                           type: string
                       required:
                       - name
@@ -4250,6 +4277,17 @@ spec:
                     type: string
                   result:
                     type: string
+                type: object
+              latestVolumeGroupMoverStatus:
+                additionalProperties:
+                  properties:
+                    logs:
+                      type: string
+                    result:
+                      type: string
+                  type: object
+                description: Logs/Summary for each mover job (one job per pvc in a
+                  volume group)
                 type: object
               nextSyncTime:
                 description: |-

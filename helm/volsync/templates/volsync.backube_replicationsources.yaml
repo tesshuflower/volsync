@@ -5266,6 +5266,16 @@ spec:
                     result:
                       type: string
                   type: object
+                latestVolumeGroupMoverStatus:
+                  additionalProperties:
+                    properties:
+                      logs:
+                        type: string
+                      result:
+                        type: string
+                    type: object
+                  description: Logs/Summary for each mover job (one job per pvc in a volume group)
+                  type: object
                 nextSyncTime:
                   description: |-
                     nextSyncTime is the time when the next volume synchronization is

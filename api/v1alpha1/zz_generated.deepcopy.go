@@ -553,6 +553,22 @@ func (in *ReplicationDestinationStatus) DeepCopyInto(out *ReplicationDestination
 		*out = new(MoverStatus)
 		**out = **in
 	}
+	if in.LatestVolumeGroupMoverStatus != nil {
+		in, out := &in.LatestVolumeGroupMoverStatus, &out.LatestVolumeGroupMoverStatus
+		*out = make(map[string]*MoverStatus, len(*in))
+		for key, val := range *in {
+			var outVal *MoverStatus
+			if val == nil {
+				(*out)[key] = nil
+			} else {
+				inVal := (*in)[key]
+				in, out := &inVal, &outVal
+				*out = new(MoverStatus)
+				**out = **in
+			}
+			(*out)[key] = outVal
+		}
+	}
 	if in.Rsync != nil {
 		in, out := &in.Rsync, &out.Rsync
 		*out = new(ReplicationDestinationRsyncStatus)
@@ -1073,6 +1089,22 @@ func (in *ReplicationSourceStatus) DeepCopyInto(out *ReplicationSourceStatus) {
 		in, out := &in.LatestMoverStatus, &out.LatestMoverStatus
 		*out = new(MoverStatus)
 		**out = **in
+	}
+	if in.LatestVolumeGroupMoverStatus != nil {
+		in, out := &in.LatestVolumeGroupMoverStatus, &out.LatestVolumeGroupMoverStatus
+		*out = make(map[string]*MoverStatus, len(*in))
+		for key, val := range *in {
+			var outVal *MoverStatus
+			if val == nil {
+				(*out)[key] = nil
+			} else {
+				inVal := (*in)[key]
+				in, out := &inVal, &outVal
+				*out = new(MoverStatus)
+				**out = **in
+			}
+			(*out)[key] = outVal
+		}
 	}
 	if in.Rsync != nil {
 		in, out := &in.Rsync, &out.Rsync
