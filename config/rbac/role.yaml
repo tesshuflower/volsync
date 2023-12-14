@@ -157,6 +157,19 @@ rules:
   - patch
   - update
 - apiGroups:
+  - groupsnapshot.storage.k8s.io
+  resources:
+  - volumegroupsnapshots
+  verbs:
+  - create
+  - delete
+  - deletecollection
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
   - populator.storage.k8s.io
   resources:
   - volumepopulators

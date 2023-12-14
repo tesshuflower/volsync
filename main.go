@@ -32,6 +32,7 @@ import (
 
 	_ "embed"
 
+	vgsnapv1alpha1 "github.com/kubernetes-csi/external-snapshotter/client/v6/apis/volumegroupsnapshot/v1alpha1"
 	snapv1 "github.com/kubernetes-csi/external-snapshotter/client/v6/apis/volumesnapshot/v1"
 	volumepopulatorv1beta1 "github.com/kubernetes-csi/volume-data-source-validator/client/apis/volumepopulator/v1beta1"
 	ocpsecurityv1 "github.com/openshift/api/security/v1"
@@ -73,6 +74,7 @@ var (
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(snapv1.AddToScheme(scheme))
+	utilruntime.Must(vgsnapv1alpha1.AddToScheme(scheme))
 	utilruntime.Must(volsyncv1alpha1.AddToScheme(scheme))
 	utilruntime.Must(ocpsecurityv1.AddToScheme(scheme))
 	utilruntime.Must(volumepopulatorv1beta1.AddToScheme(scheme))

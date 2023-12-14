@@ -319,7 +319,7 @@ func (m *Mover) ensureDestinationPVC(ctx context.Context) (*corev1.PersistentVol
 		return m.vh.UseProvidedPVC(ctx, dataPVCName)
 	}
 	// Need to allocate the incoming data volume
-	return m.vh.EnsureNewPVC(ctx, m.logger, dataPVCName)
+	return m.vh.EnsureNewPVC(ctx, m.logger, dataPVCName, nil)
 }
 
 func (m *Mover) getDestinationPVCName() (bool, string) {

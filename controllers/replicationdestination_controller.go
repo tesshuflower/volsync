@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	vgsnapv1alpha1 "github.com/kubernetes-csi/external-snapshotter/client/v6/apis/volumegroupsnapshot/v1alpha1"
 	snapv1 "github.com/kubernetes-csi/external-snapshotter/client/v6/apis/volumesnapshot/v1"
 	"github.com/prometheus/client_golang/prometheus"
 	batchv1 "k8s.io/api/batch/v1"
@@ -78,6 +79,7 @@ var _ sm.ReplicationMachine = &rdMachine{}
 //+kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=rolebindings,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=security.openshift.io,resources=securitycontextconstraints,resourceNames=volsync-privileged-mover,verbs=use
 //+kubebuilder:rbac:groups=snapshot.storage.k8s.io,resources=volumesnapshots,verbs=get;list;watch;create;update;patch;delete;deletecollection
+//+kubebuilder:rbac:groups=groupsnapshot.storage.k8s.io,resources=volumegroupsnapshots,verbs=get;list;watch;create;update;patch;delete;deletecollection
 
 //nolint:funlen
 func (r *ReplicationDestinationReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -164,6 +166,7 @@ func (r *ReplicationDestinationReconciler) SetupWithManager(mgr ctrl.Manager) er
 		Owns(&rbacv1.Role{}).
 		Owns(&rbacv1.RoleBinding{}).
 		Owns(&snapv1.VolumeSnapshot{}).
+		Owns(&vgsnapv1alpha1.VolumeGroupSnapshot{}). //TODO: will need to only enable this on systems with support
 		Complete(r)
 }
 
@@ -269,7 +272,7 @@ func (m *rdMachine) Synchronize(ctx context.Context) (mover.Result, error) {
 
 	if result.Completed && result.Image != nil {
 		// Mark previous latestImage for cleanup if it was a snapshot
-		err = utils.MarkOldSnapshotForCleanup(ctx, m.client, m.logger, m.rd,
+		err = utils.MarkOldSnapshotOrGroupSnapshotForCleanup(ctx, m.client, m.logger, m.rd,
 			m.rd.Status.LatestImage, result.Image)
 		if err != nil {
 			return mover.InProgress(), err

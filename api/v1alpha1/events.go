@@ -25,7 +25,8 @@ const (
 	EvRTransferStarted = "TransferStarted"
 	EvRTransferFailed  = "TransferFailed" // Warning
 	EvRSnapCreated     = "VolumeSnapshotCreated"
-	EvRSnapNotBound    = "VolumeSnapshotNotBound" // Warning
+	EvRSnapNotBound    = "VolumeSnapshotNotBound"      // Warning
+	EvRVGSnapNotBound  = "VolumeGroupSnapshotNotBound" // Warning
 	EvRPVCCreated      = "PersistentVolumeClaimCreated"
 	EvRPVCNotBound     = "PersistentVolumeClaimNotBound" // Warning
 	EvRSvcAddress      = "ServiceAddressAssigned"
@@ -34,11 +35,12 @@ const (
 
 // ReplicationSource/ReplicationDestination Event "action" strings: Things the controller "does"
 const (
-	EvANone        = "" // No action
-	EvACreateMover = "CreateMover"
-	EvADeleteMover = "DeleteMover"
-	EvACreatePVC   = "CreatePersistentVolumeClaim"
-	EvACreateSnap  = "CreateVolumeSnapshot"
+	EvANone         = "" // No action
+	EvACreateMover  = "CreateMover"
+	EvADeleteMover  = "DeleteMover"
+	EvACreatePVC    = "CreatePersistentVolumeClaim"
+	EvACreateSnap   = "CreateVolumeSnapshot"
+	EvACreateVGSnap = "CreateVolumeGroupSnapshot"
 )
 
 // Volume Populator Event "reason" strings

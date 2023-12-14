@@ -122,7 +122,17 @@ type CustomCASpec struct {
 }
 
 type SourcePVCGroup struct {
+	//TODO: possibly instead of selector use source volumesnapshotsource
+	//TODO:  See:  https://github.com/kubernetes-csi/external-snapshotter/blob/cdbbb78ff88de2d72bdeb2e3bb30f81e12128a55/client/apis/volumegroupsnapshot/v1alpha1/types.go#L31
 	Selector metav1.LabelSelector `json:"selector,omitempty"`
+
+	// VolumeGroupSnapshotClassName is the name of the VolumeGroupSnapshotClass
+	// requested by the VolumeGroupSnapshot.
+	// VolumeGroupSnapshotClassName may be left nil to indicate that the default
+	// class will be used.
+	// Empty string is not allowed for this field.
+	// +optional
+	VolumeGroupSnapshotClassName *string `json:"volumeGroupSnapshotClassName,omitempty"`
 }
 
 // TODO: rename, perhaps move somewhere?
@@ -138,4 +148,16 @@ type DestinationPVCGroupMember struct {
 	//+optional
 	TempPVCName string `json:"tempPVCName,omitempty"` //TODO: rename field?
 	//TODO: size, spec stuff
+}
+
+func (m DestinationPVCGroupMember) GetOriginalPVCName() string {
+	return m.Name
+}
+
+func (m DestinationPVCGroupMember) GetDestinationPVCName() string {
+	// If TempPVCName is specified - this name should be used as the pvc to replicate into at the destination
+	if m.TempPVCName != "" {
+		return m.TempPVCName
+	}
+	return m.Name
 }
