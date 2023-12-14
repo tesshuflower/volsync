@@ -19,10 +19,13 @@ package utils
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"github.com/go-logr/logr"
 	snapv1 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
+	vgsnapv1alpha1 "github.com/kubernetes-csi/external-snapshotter/client/v6/apis/volumegroupsnapshot/v1alpha1"
+	snapv1 "github.com/kubernetes-csi/external-snapshotter/client/v7/apis/volumesnapshot/v1"
 	corev1 "k8s.io/api/core/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -65,6 +68,7 @@ func CleanupObjects(ctx context.Context, c client.Client,
 				l.Error(err, "unable to delete volume snapshot(s)")
 				return err
 			}
+			//TODO: cleanup volumegroupsnapshots too, similarly to volumesnapshots
 		} else {
 			err := c.DeleteAllOf(ctx, obj, options...)
 			if client.IgnoreNotFound(err) != nil {
@@ -131,6 +135,7 @@ func CleanupSnapshotsWithLabelCheck(ctx context.Context, c client.Client,
 	return nil
 }
 
+// TODO: handle volumegroupsnapshots
 func RelinquishOwnedSnapshotsWithDoNotDeleteLabel(ctx context.Context, c client.Client,
 	logger logr.Logger, owner client.Object) error {
 	// Find all snapshots in the namespace with the do not delete label
@@ -156,6 +161,7 @@ func RelinquishOwnedSnapshotsWithDoNotDeleteLabel(ctx context.Context, c client.
 }
 
 // Returns a list of remaining VolumeSnapshots that were not relinquished
+// TODO: handle volumegroupsnapshots
 func relinquishSnapshotsWithDoNotDeleteLabel(ctx context.Context, c client.Client,
 	logger logr.Logger, owner client.Object,
 	snapList *snapv1.VolumeSnapshotList) ([]snapv1.VolumeSnapshot, error) {
@@ -203,11 +209,13 @@ func RemoveSnapOwnershipAndLabelsIfRequestedAndUpdate(ctx context.Context, c cli
 	return ownershipRemoved, nil
 }
 
-func IsMarkedDoNotDelete(snapshot *snapv1.VolumeSnapshot) bool {
+// Check VolumeSnapshot or VolumeGroupSnapshot for DoNotDelete label
+func IsMarkedDoNotDelete(snapshot metav1.Object) bool {
 	return HasLabel(snapshot, DoNotDeleteLabelKey)
 }
 
-func MarkDoNotDelete(snapshot *snapv1.VolumeSnapshot) bool {
+// Mark VolumeSnapshot or VolumeGroupSnapshot with DoNotDelete label
+func MarkDoNotDelete(snapshot metav1.Object) bool {
 	return AddLabel(snapshot, DoNotDeleteLabelKey, "true")
 }
 
@@ -265,17 +273,17 @@ func hasOtherOwnerRef(obj metav1.Object, owner client.Object) bool {
 	return false
 }
 
-func MarkOldSnapshotForCleanup(ctx context.Context, c client.Client, logger logr.Logger,
+func MarkOldSnapshotOrGroupSnapshotForCleanup(ctx context.Context, c client.Client, logger logr.Logger,
 	owner metav1.Object, oldImage, latestImage *corev1.TypedLocalObjectReference) error {
 	// Make sure we only delete an old snapshot (it's a snapshot, but not the
 	// current one)
 
-	// There's no latestImage or type != snapshot
-	if !IsSnapshot(latestImage) {
+	// There's no latestImage or type != snapshot or volumegroupsnapshot
+	if !IsSnapshot(latestImage) && !IsGroupSnapshot(latestImage) {
 		return nil
 	}
-	// No oldImage or type != snapshot
-	if !IsSnapshot(oldImage) {
+	// No oldImage or type != snapshot or volumegroupsnapshot
+	if !IsSnapshot(oldImage) && !IsGroupSnapshot(oldImage) {
 		return nil
 	}
 
@@ -284,32 +292,47 @@ func MarkOldSnapshotForCleanup(ctx context.Context, c client.Client, logger logr
 		return nil
 	}
 
-	oldSnap := &snapv1.VolumeSnapshot{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      oldImage.Name,
-			Namespace: owner.GetNamespace(),
-		},
+	var oldSnap client.Object
+	oldSnapKind := oldImage.Kind
+
+	if IsSnapshot(oldImage) {
+		oldSnap = &snapv1.VolumeSnapshot{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      oldImage.Name,
+				Namespace: owner.GetNamespace(),
+			},
+		}
+	} else {
+		// VolumeGroupSnapshot
+		oldSnap = &vgsnapv1alpha1.VolumeGroupSnapshot{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      oldImage.Name,
+				Namespace: owner.GetNamespace(),
+			},
+		}
 	}
+
 	err := c.Get(ctx, client.ObjectKeyFromObject(oldSnap), oldSnap)
 	if kerrors.IsNotFound(err) {
 		// Nothing to cleanup
 		return nil
 	}
 	if err != nil {
-		logger.Error(err, "unable to get snapshot", "name", oldSnap.GetName(), "namespace", oldSnap.GetNamespace())
+		logger.Error(err, fmt.Sprintf("unable to get %s", oldSnapKind),
+			"name", oldSnap.GetName(), "namespace", oldSnap.GetNamespace())
 		return err
 	}
 
 	if IsMarkedDoNotDelete(oldSnap) {
-		logger.Info("Snapshot is marked do-not-delete, will not mark for cleanup")
+		logger.Info(fmt.Sprintf("%s is marked do-not-delete, will not mark for cleanup", oldSnapKind))
 		return nil
 	}
 
-	// Update the old snapshot with the cleanup label
+	// Update the old snapshot/groupsnapshot with the cleanup label
 	MarkForCleanup(owner, oldSnap)
 	err = c.Update(ctx, oldSnap)
 	if err != nil && !kerrors.IsNotFound(err) {
-		logger.Error(err, "unable to update snapshot with cleanup label",
+		logger.Error(err, fmt.Sprintf("unable to update %s with cleanup label", oldSnapKind),
 			"name", oldSnap.GetName(), "namespace", oldSnap.GetNamespace())
 		return err
 	}
@@ -321,6 +344,17 @@ func IsSnapshot(image *corev1.TypedLocalObjectReference) bool {
 		return false
 	}
 	if image.Kind != "VolumeSnapshot" || image.APIGroup == nil || *image.APIGroup != snapv1.SchemeGroupVersion.Group {
+		return false
+	}
+	return true
+}
+
+func IsGroupSnapshot(image *corev1.TypedLocalObjectReference) bool {
+	if image == nil {
+		return false
+	}
+	if image.Kind != "VolumeGroupSnapshot" ||
+		image.APIGroup == nil || *image.APIGroup != vgsnapv1alpha1.SchemeGroupVersion.Group {
 		return false
 	}
 	return true

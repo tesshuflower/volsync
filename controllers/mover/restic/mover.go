@@ -211,7 +211,7 @@ func (m *Mover) ensureCache(ctx context.Context,
 	// Allocate cache volume
 	cacheName := mover.VolSyncPrefix + m.owner.GetName() + "-cache"
 	m.logger.Info("allocating cache volume", "PVC", cacheName)
-	return cacheVh.EnsureNewPVC(ctx, m.logger, cacheName)
+	return cacheVh.EnsureNewPVC(ctx, m.logger, cacheName, nil)
 }
 
 func (m *Mover) ensureSourcePVC(ctx context.Context) (*corev1.PersistentVolumeClaim, error) {
@@ -246,7 +246,7 @@ func (m *Mover) ensureDestinationPVC(ctx context.Context) (*corev1.PersistentVol
 		return m.vh.UseProvidedPVC(ctx, dataPVCName)
 	}
 	// Need to allocate the incoming data volume
-	return m.vh.EnsureNewPVC(ctx, m.logger, dataPVCName)
+	return m.vh.EnsureNewPVC(ctx, m.logger, dataPVCName, nil)
 }
 
 func (m *Mover) getDestinationPVCName() (bool, string) {

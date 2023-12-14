@@ -88,6 +88,7 @@ var _ mover.Mover = &Mover{}
 // individual objects to be cleaned up must also be marked.
 var cleanupTypes = []client.Object{
 	&corev1.PersistentVolumeClaim{},
+	//TODO: volumegroupsnapshot
 	&snapv1.VolumeSnapshot{},
 	&batchv1.Job{},
 }
@@ -152,16 +153,7 @@ func (m *Mover) Synchronize(ctx context.Context) (mover.Result, error) {
 
 	// On the destination, preserve the image and return it
 	if !m.isSource {
-		//FIXME: remove - Take 1 volumegroup backup once Vgroups are available
-		//FIXME: May need to ensure that the label selector is properly applied to the PVCs
-		var dataPVC *corev1.PersistentVolumeClaim
-		for _, v := range dataPVCGroup.pvcs {
-			dataPVC = v
-			break
-		}
-		//FIXME: end fixme
-
-		image, err := m.vh.EnsureImage(ctx, m.logger, dataPVC)
+		image, err := m.vh.EnsureImages(ctx, m.logger, dataPVCGroup.pvcs, dataPVCGroup.volumeGroupPVCLabelSelector)
 		if image == nil || err != nil {
 			return mover.InProgress(), err
 		}
@@ -341,13 +333,27 @@ func (m *Mover) serviceSelector() map[string]string {
 func (m *Mover) Cleanup(ctx context.Context) (mover.Result, error) {
 	m.logger.V(1).Info("Starting cleanup", "m.mainPVCName", m.mainPVCName, "m.isSource", m.isSource)
 	if !m.isSource {
-		m.logger.V(1).Info("removing snapshot annotations from pvc")
-		// Cleanup the snapshot annotation on pvc for replicationDestination scenario so that
-		// on the next sync (if snapshot CopyMethod is being used) a new snapshot will be created rather than re-using
-		_, destPVCName := m.getDestinationPVCName()
-		err := m.vh.RemoveSnapshotAnnotationFromPVC(ctx, m.logger, destPVCName)
-		if err != nil {
-			return mover.InProgress(), err
+		if len(m.mainPVCGroup) > 0 {
+			//TODO: refactor this cleanup for volume groups
+			// Volume group scenario
+			m.logger.V(1).Info("removing snapshot annotations from pvcs in group")
+			// Cleanup the snapshot annotation on pvc for replicationDestination scenario so that
+			// on the next sync (if snapshot CopyMethod is being used) a new snapshot will be created rather than re-using
+			for _, pvcInGroup := range m.mainPVCGroup {
+				err := m.vh.RemoveGroupSnapshotAnnotationFromPVC(ctx, m.logger, pvcInGroup.GetDestinationPVCName())
+				if err != nil {
+					return mover.InProgress(), err
+				}
+			}
+		} else {
+			m.logger.V(1).Info("removing snapshot annotations from pvc")
+			// Cleanup the snapshot annotation on pvc for replicationDestination scenario so that
+			// on the next sync (if snapshot CopyMethod is being used) a new snapshot will be created rather than re-using
+			_, destPVCName := m.getDestinationPVCName()
+			err := m.vh.RemoveSnapshotAnnotationFromPVC(ctx, m.logger, destPVCName)
+			if err != nil {
+				return mover.InProgress(), err
+			}
 		}
 	}
 
@@ -393,52 +399,63 @@ func (m *Mover) ensureSourcePVCs(ctx context.Context) (*pvcGroup, error) {
 
 	if m.mainPVCGroupSelector != nil {
 		srcPVCGroup.isVolumeGroup = true
+		srcPVCGroup.volumeGroupPVCLabelSelector = &m.mainPVCGroupSelector.Selector
+
+		if m.mainPVCGroupSelector == nil {
+			err := fmt.Errorf("unable to get source PVC - sourcePVC or sourcePVCGroupSelector must be specified")
+			m.logger.Error(err, "ensureSourcePVCs")
+			return nil, err
+		}
+
+		// Create volumegroupsnapshot
+		groupName := mover.VolSyncPrefix + m.owner.GetName() + "-" + m.direction()
+		snapGrpPVCs, err := m.vh.EnsureGroupPVCsFromSrc(ctx, m.logger, srcPVCGroup.volumeGroupPVCLabelSelector,
+			groupName, true)
+		if snapGrpPVCs == nil || err != nil {
+			return nil, err
+		}
+		srcPVCGroup.pvcs = snapGrpPVCs
 
 		/*
-			if m.mainPVCGroup.Selector == nil {
-				err := fmt.Errorf("unable to get source PVC - sourcePVC or sourcePVCGroupSelector must be specified")
-				m.logger.Error(err, "ensureSourcePVCs")
+			//FIXME: temp workaround without volumegroup stuff
+			// 1. lookup PVCs by selector
+			pvcSelector, err := metav1.LabelSelectorAsSelector(&m.mainPVCGroupSelector.Selector)
+			if err != nil {
+				m.logger.Error(err, "Unable to parse pvc volume group selector")
 				return nil, err
 			}
+			listOptions := []client.ListOption{
+				client.MatchingLabelsSelector{
+					Selector: pvcSelector,
+				},
+				client.InNamespace(m.owner.GetNamespace()),
+			}
+			pvcGroupList := &corev1.PersistentVolumeClaimList{}
+			err = m.client.List(ctx, pvcGroupList, listOptions...)
+			if err != nil {
+				return nil, err
+			}
+
+			if len(pvcGroupList.Items) == 0 {
+				return nil, fmt.Errorf("No src PVCs found")
+			}
+
+			srcPVCGroup.pvcs = map[string]*corev1.PersistentVolumeClaim{}
+
+			// 2. take individual snapshots (reusing vh code temporarily - will only work for CopyMode: Snapshot)
+			for i := range pvcGroupList.Items {
+				srcPVC := &pvcGroupList.Items[i]
+				dataName := mover.VolSyncPrefix + m.owner.GetName() + "-" + m.direction() + "-" + srcPVC.GetName()
+				pvcSnapshotted, err := m.vh.EnsurePVCFromSrc(ctx, m.logger, srcPVC, dataName, true)
+				if err != nil || pvcSnapshotted == nil {
+					//don't care if these are going to happen 1 at a time, will be replaced with volumesnapshot
+					return nil, err
+				}
+				// srcPVC is the orignal source PVC
+				srcPVCGroup.pvcs[srcPVC.GetName()] = pvcSnapshotted
+			}
+			//FIXME: end - should take a volumegroupsnapshot instead
 		*/
-
-		//FIXME: temp workaround without volumegroup stuff
-		// 1. lookup PVCs by selector
-		pvcSelector, err := metav1.LabelSelectorAsSelector(&m.mainPVCGroupSelector.Selector)
-		if err != nil {
-			m.logger.Error(err, "Unable to parse pvc volume group selector")
-			return nil, err
-		}
-		listOptions := []client.ListOption{
-			client.MatchingLabelsSelector{
-				Selector: pvcSelector,
-			},
-			client.InNamespace(m.owner.GetNamespace()),
-		}
-		pvcGroupList := &corev1.PersistentVolumeClaimList{}
-		err = m.client.List(ctx, pvcGroupList, listOptions...)
-		if err != nil {
-			return nil, err
-		}
-
-		if len(pvcGroupList.Items) == 0 {
-			return nil, fmt.Errorf("No src PVCs found")
-		}
-
-		srcPVCGroup.pvcs = map[string]*corev1.PersistentVolumeClaim{}
-
-		// 2. take individual snapshots (reusing vh code temporarily - will only work for CopyMode: Snapshot)
-		for i := range pvcGroupList.Items {
-			srcPVC := &pvcGroupList.Items[i]
-			dataName := mover.VolSyncPrefix + m.owner.GetName() + "-" + m.direction() + "-" + srcPVC.GetName()
-			pvcSnapshotted, err := m.vh.EnsurePVCFromSrc(ctx, m.logger, srcPVC, dataName, true)
-			if err != nil || pvcSnapshotted == nil {
-				//don't care if these are going to happen 1 at a time, will be replaced with volumesnapshot
-				return nil, err
-			}
-			srcPVCGroup.pvcs[srcPVC.GetName() /*original PVC name*/] = pvcSnapshotted
-		}
-		//FIXME: end - should take a volumegroupsnapshot instead
 
 	} else {
 		srcPVCGroup.isVolumeGroup = false
@@ -470,7 +487,7 @@ func (m *Mover) ensureDestinationPVC(ctx context.Context) (*corev1.PersistentVol
 		return m.vh.UseProvidedPVC(ctx, dataPVCName)
 	}
 	// Need to allocate the incoming data volume
-	return m.vh.EnsureNewPVC(ctx, m.logger, dataPVCName)
+	return m.vh.EnsureNewPVC(ctx, m.logger, dataPVCName, nil)
 }
 
 // func (m *Mover) ensureDestinationPVC(ctx context.Context) (*corev1.PersistentVolumeClaim, error) {
@@ -478,24 +495,35 @@ func (m *Mover) ensureDestinationPVCs(ctx context.Context) (*pvcGroup, error) {
 	dstPVCGroup := pvcGroup{}
 
 	if len(m.mainPVCGroup) > 0 {
+		//TODO: need to handle the isProvidedPVC case? if so, will need to make sure
+		// a unique labelSelector is found so we can create a volume group snapshot later
+
 		// Volume Group case
 		dstPVCGroup.isVolumeGroup = true
 
 		dstPVCGroup.pvcs = map[string]*corev1.PersistentVolumeClaim{}
 
+		volGroupLabelKey := "volsync-volgroup-for-rd"
+		volGroupLabelValue := m.owner.GetName()
+
+		pvcLabels := map[string]string{
+			volGroupLabelKey: volGroupLabelValue,
+		}
+
+		// This label will be used as our label selector (will be used later to create a volume group snap)
+		dstPVCGroup.volumeGroupPVCLabelSelector = &metav1.LabelSelector{
+			MatchLabels: pvcLabels,
+		}
+
 		for _, memberPVC := range m.mainPVCGroup {
 			// Need to allocate the incoming data volumes
-			newPVCName := memberPVC.TempPVCName
-			if newPVCName == "" {
-				newPVCName = memberPVC.Name // Will match the original PVC name from the src in this case
-			}
-			newPVC, err := m.vh.EnsureNewPVC(ctx, m.logger, newPVCName)
+			newPVC, err := m.vh.EnsureNewPVC(ctx, m.logger, memberPVC.GetDestinationPVCName(), pvcLabels)
 			//FIXME: the above won't work if any pvcs have differing sizes or if they already exist.
 			//FIXME: this is just temporary to test out for the moment
 			if err != nil || newPVC == nil {
 				return nil, err
 			}
-			dstPVCGroup.pvcs[memberPVC.Name /*The original src pvc name*/] = newPVC
+			dstPVCGroup.pvcs[memberPVC.GetOriginalPVCName() /*The original src pvc name*/] = newPVC
 		}
 	} else {
 		// Single PVC case
@@ -509,7 +537,7 @@ func (m *Mover) ensureDestinationPVCs(ctx context.Context) (*pvcGroup, error) {
 			}
 		}
 		// Need to allocate the incoming data volume
-		pvc, err := m.vh.EnsureNewPVC(ctx, m.logger, dataPVCName)
+		pvc, err := m.vh.EnsureNewPVC(ctx, m.logger, dataPVCName, nil)
 		if err != nil || pvc == nil {
 			return nil, err
 		}
@@ -745,10 +773,11 @@ func (m *Mover) ensureJob(ctx context.Context, jobName string, dataPVC *corev1.P
 
 // TODO: Move me
 type pvcGroup struct {
-	isVolumeGroup  bool
-	pvcs           map[string]*corev1.PersistentVolumeClaim
-	pvcNamesSorted []string
-	pvcPorts       map[string]int32
+	isVolumeGroup               bool
+	volumeGroupPVCLabelSelector *metav1.LabelSelector
+	pvcs                        map[string]*corev1.PersistentVolumeClaim
+	pvcNamesSorted              []string
+	pvcPorts                    map[string]int32
 }
 
 func (pg *pvcGroup) GetPVCByName(pvcName string) *corev1.PersistentVolumeClaim {
@@ -774,6 +803,7 @@ func (pg *pvcGroup) GetPVCNamesSorted() []string {
 	return pg.pvcNamesSorted
 }
 
+// TODO:  This is specific to rsync-tls
 func (pg *pvcGroup) GetDestinationPort(pvcName string) int32 {
 	if pg.pvcPorts == nil {
 		pg.pvcPorts = map[string]int32{}

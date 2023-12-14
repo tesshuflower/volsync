@@ -26,7 +26,8 @@ const (
 	EvRTransferStarted                     = "TransferStarted"
 	EvRTransferFailed                      = "TransferFailed" // Warning
 	EvRSnapCreated                         = "VolumeSnapshotCreated"
-	EvRSnapNotBound                        = "VolumeSnapshotNotBound" // Warning
+	EvRSnapNotBound                        = "VolumeSnapshotNotBound"      // Warning
+	EvRVGSnapNotBound                      = "VolumeGroupSnapshotNotBound" // Warning
 	EvRPVCCreated                          = "PersistentVolumeClaimCreated"
 	EvRPVCNotBound                         = "PersistentVolumeClaimNotBound" // Warning
 	EvRSvcAddress                          = "ServiceAddressAssigned"
@@ -45,6 +46,7 @@ const (
 	EvACreatePVC                     = "CreatePersistentVolumeClaim"
 	EvACreateSnap                    = "CreateVolumeSnapshot"
 	EvACreateSrcCopyUsingCopyTrigger = "CreateSrcCopyUsingCopyTrigger"
+	EvACreateVGSnap                  = "CreateVolumeGroupSnapshot"
 )
 
 // Volume Populator Event "reason" strings

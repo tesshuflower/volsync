@@ -4097,10 +4097,8 @@ spec:
                 description: sourcePVCGroup
                 properties:
                   selector:
-                    description: A label selector is a label query over a set of resources.
-                      The result of matchLabels and matchExpressions are ANDed. An
-                      empty label selector matches all objects. A null label selector
-                      matches no objects.
+                    description: 'TODO: possibly instead of selector use source volumesnapshotsource
+                      TODO:  See:  https://github.com/kubernetes-csi/external-snapshotter/blob/cdbbb78ff88de2d72bdeb2e3bb30f81e12128a55/client/apis/volumegroupsnapshot/v1alpha1/types.go#L31'
                     properties:
                       matchExpressions:
                         description: matchExpressions is a list of label selector
@@ -4144,6 +4142,12 @@ spec:
                         type: object
                     type: object
                     x-kubernetes-map-type: atomic
+                  volumeGroupSnapshotClassName:
+                    description: VolumeGroupSnapshotClassName is the name of the VolumeGroupSnapshotClass
+                      requested by the VolumeGroupSnapshot. VolumeGroupSnapshotClassName
+                      may be left nil to indicate that the default class will be used.
+                      Empty string is not allowed for this field.
+                    type: string
                 type: object
               syncthing:
                 description: syncthing defines the configuration when using Syncthing-based
