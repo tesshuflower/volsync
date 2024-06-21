@@ -23,9 +23,8 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	vgsnapv1alpha1 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumegroupsnapshot/v1alpha1"
 	snapv1 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
-	vgsnapv1alpha1 "github.com/kubernetes-csi/external-snapshotter/client/v6/apis/volumegroupsnapshot/v1alpha1"
-	snapv1 "github.com/kubernetes-csi/external-snapshotter/client/v7/apis/volumesnapshot/v1"
 	"github.com/prometheus/client_golang/prometheus"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -178,12 +177,13 @@ func (r *ReplicationSourceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, o client.Object) []reconcile.Request {
 				return mapFuncCopyTriggerPVCToReplicationSource(ctx, mgr.GetClient(), o)
 								}), builder.WithPredicates(copyTriggerPVCPredicate())).
-		Owns(&vgsnapv1alpha1.VolumeGroupSnapshot{}). //TODO: will need to only enable this on systems with support
+		Owns(&vgsnapv1alpha1.VolumeGroupSnapshot{}). // TODO: will need to only enable this on systems with support
 		Complete(r)
 }
 
 func mapFuncCopyTriggerPVCToReplicationSource(ctx context.Context, k8sClient client.Client,
-	o client.Object) []reconcile.Request {
+	o client.Object,
+) []reconcile.Request {
 	logger := ctrl.Log.WithName("mapFuncCopyTriggerPVCToReplicationSource")
 
 	pvc, ok := o.(*corev1.PersistentVolumeClaim)
@@ -262,7 +262,8 @@ func IndexFieldsForReplicationSource(ctx context.Context, fieldIndexer client.Fi
 }
 
 func newRSMachine(rs *volsyncv1alpha1.ReplicationSource, c client.Client,
-	l logr.Logger, er events.EventRecorder, privilegedMoverOk bool) (*rsMachine, error) {
+	l logr.Logger, er events.EventRecorder, privilegedMoverOk bool,
+) (*rsMachine, error) {
 	dataMover, err := mover.GetSourceMoverFromCatalog(c, l, er, rs, privilegedMoverOk)
 	if err != nil {
 		return nil, err

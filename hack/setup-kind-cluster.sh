@@ -166,19 +166,42 @@ if [[ $KUBE_MINOR -ge 24 ]]; then  # Kube 1.24 removed snapshot.storage.k8s.io/v
   # renovate: datasource=github-releases depName=kubernetes-csi/external-snapshotter versioning=semver-coerced
   TAG="v8.0.1"  # https://github.com/kubernetes-csi/external-snapshotter/releases
   log "Deploying external snapshotter: ${TAG}"
-  kubectl create -k "https://github.com/kubernetes-csi/external-snapshotter/client/config/crd?ref=${TAG}"
+  #kubectl create -k "https://github.com/kubernetes-csi/external-snapshotter/client/config/crd?ref=${TAG}"
   #TODO: May need to do this only for KUBE >= 1.27
-  kubectl create -f "https://raw.githubusercontent.com/kubernetes-csi/external-snapshotter/${TAG}/client/config/crd/groupsnapshot.storage.k8s.io_volumegroupsnapshotclasses.yaml"
-  kubectl create -f "https://raw.githubusercontent.com/kubernetes-csi/external-snapshotter/${TAG}/client/config/crd/groupsnapshot.storage.k8s.io_volumegroupsnapshotcontents.yaml"
-  kubectl create -f "https://raw.githubusercontent.com/kubernetes-csi/external-snapshotter/${TAG}/client/config/crd/groupsnapshot.storage.k8s.io_volumegroupsnapshots.yaml"
+  #kubectl create -f "https://raw.githubusercontent.com/kubernetes-csi/external-snapshotter/${TAG}/client/config/crd/groupsnapshot.storage.k8s.io_volumegroupsnapshotclasses.yaml"
+  #kubectl create -f "https://raw.githubusercontent.com/kubernetes-csi/external-snapshotter/${TAG}/client/config/crd/groupsnapshot.storage.k8s.io_volumegroupsnapshotcontents.yaml"
+  #kubectl create -f "https://raw.githubusercontent.com/kubernetes-csi/external-snapshotter/${TAG}/client/config/crd/groupsnapshot.storage.k8s.io_volumegroupsnapshots.yaml"
   #END TODO:
-  kubectl create -n kube-system -k "https://github.com/kubernetes-csi/external-snapshotter/deploy/kubernetes/snapshot-controller?ref=${TAG}"
+  #kubectl create -n kube-system -k "https://github.com/kubernetes-csi/external-snapshotter/deploy/kubernetes/snapshot-controller?ref=${TAG}"
 
-  # Deploy validating webhook server for snapshots: https://github.com/kubernetes-csi/external-snapshotter#validating-webhook
-  log "Deploying validating webhook server for volumesnapshots: ${TAG}"
   EXT_SNAPSHOTTER_BASE="$(mktemp --tmpdir -d external-snapshotter-XXXXXX)"
   git clone --depth 1 -b "${TAG}" https://github.com/kubernetes-csi/external-snapshotter.git "${EXT_SNAPSHOTTER_BASE}"
 
+  # Deploy crds
+  kubectl create -k "${EXT_SNAPSHOTTER_BASE}/client/config/crd"
+  #TODO: May need to do this only for KUBE >= 1.27
+  # Only need to do this until the kustomize.yaml is updated to include these 3 for volumegroup snapshotting
+  kubectl create -f "${EXT_SNAPSHOTTER_BASE}/client/config/crd/groupsnapshot.storage.k8s.io_volumegroupsnapshotclasses.yaml"
+  kubectl create -f "${EXT_SNAPSHOTTER_BASE}/client/config/crd/groupsnapshot.storage.k8s.io_volumegroupsnapshotcontents.yaml"
+  kubectl create -f "${EXT_SNAPSHOTTER_BASE}/client/config/crd/groupsnapshot.storage.k8s.io_volumegroupsnapshots.yaml"
+  #END TODO:
+
+  #
+  # deploy snapshot controller
+  #
+  # make sure image tag matches the version we want
+  # Could alternatively do: kustomize edit set image registry.k8s.io/sig-storage/snapshot-controller:${TAG}  (but then would rely on kustomize in this script)
+  cat - >> "${EXT_SNAPSHOTTER_BASE}/deploy/kubernetes/snapshot-controller/kustomization.yaml" <<EXTSNAPKUST
+images:
+  - name: registry.k8s.io/sig-storage/snapshot-controller
+    newTag: ${TAG}
+EXTSNAPKUST
+  # Now deploy the controller
+  kubectl create -n kube-system -k "${EXT_SNAPSHOTTER_BASE}/deploy/kubernetes/snapshot-controller"
+  kubectl -n kube-system rollout status deployment snapshot-controller --timeout 5m
+
+  # Deploy validating webhook server for snapshots: https://github.com/kubernetes-csi/external-snapshotter#validating-webhook
+  log "Deploying validating webhook server for volumesnapshots: ${TAG}"
   SNAP_WEBHOOK_PATH="${EXT_SNAPSHOTTER_BASE}/deploy/kubernetes/webhook-example"
   # webhook server need a TLS certificate - run script to generate and deploy secret to cluster (requires openssl)
   "${SNAP_WEBHOOK_PATH}"/create-cert.sh --service snapshot-validation-service --secret snapshot-validation-secret --namespace kube-system
@@ -306,7 +329,7 @@ kubectl annotate sc/csi-hostpath-sc storageclass.kubernetes.io/is-default-class=
 
 # For some versions we need to create the snapclass ourselves
 if [[ $KUBE_MINOR -eq 15 || $KUBE_MINOR -eq 16 ]]; then
-  log "Creating VolumeStorageClass for CSI hostpath driver"
+  log "Creating VolumeSnapshotClass for CSI hostpath driver"
   kubectl create -f - <<SNAPALPHA
 apiVersion: snapshot.storage.k8s.io/v1alpha1
 kind: VolumeSnapshotClass
@@ -318,6 +341,33 @@ fi
 
 # Make VSC the cluster default
 kubectl annotate volumesnapshotclass/csi-hostpath-snapclass snapshot.storage.kubernetes.io/is-default-class="true"
+
+# Volume group snapshot class
+if [[ $KUBE_MINOR -ge 27 ]]; then
+  log "Creating VolumeGroupSnapshotClass for CSI hostpath driver"
+  kubectl create -f - <<VGSNAPALPHA
+apiVersion: groupsnapshot.storage.k8s.io/v1alpha1
+kind: VolumeGroupSnapshotClass
+metadata:
+  name: csi-hostpath-groupsnapclass
+deletionPolicy: Delete
+driver: hostpath.csi.k8s.io
+VGSNAPALPHA
+
+  # Make VGSC the cluster default
+  kubectl annotate volumegroupsnapshotclass/csi-hostpath-groupsnapclass groupsnapshot.storage.kubernetes.io/is-default-class="true"
+
+  ##
+  ## TODO: hopefully these won't be needed in the future
+  ##
+  # patch csi-hostpath to update csihostpathplugin image and csi-snapshotter image
+  kubectl -n default patch statefulsets csi-hostpathplugin --type=json -p='[{"op": "replace", "path": "/spec/template/spec/containers/0/image", "value": "registry.k8s.io/sig-storage/hostpathplugin:v1.13.0"}, {"op": "replace", "path": "/spec/template/spec/containers/7/image", "value": "registry.k8s.io/sig-storage/csi-snapshotter:v8.0.1"}]' #FIXME: don't hardcode the csi-hostpath and csi-snapshotter versions in this command
+  # patch csi-hostpath to enable vgsnapshots (arg needed in csi-snapshotter container)
+  kubectl -n default patch statefulsets csi-hostpathplugin --type=json -p='[{"op": "add", "path": "/spec/template/spec/containers/7/args/-", "value": "--enable-volume-group-snapshots=true" }]'
+  # patch snapshot-controller to enable vgsnapshots (arg )
+  kubectl -n kube-system patch deploy snapshot-controller --type=json -p='[{"op": "add", "path": "/spec/template/spec/containers/0/args/-", "value": "--enable-volume-group-snapshots=true" }]'
+fi
+
 
 # On 1.20, we need to enable fsGroup so that volumes are writable
 # Release v1.9.0 included this change for 1.21+

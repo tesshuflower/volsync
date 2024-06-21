@@ -132,6 +132,30 @@ spec:
                       automatically provisioning one. Either this field or both capacity and
                       accessModes must be specified.
                     type: string
+                  destinationPVCGroup:
+                    description: 'TODO: doc'
+                    items:
+                      description: |-
+                        TODO: rename, perhaps move somewhere?
+
+
+                        type DestinationPVCGroup struct {
+                        MemberPVCs []DestinationPVCGroupMember `json:"memberPVCs,omitempty"`
+                        }
+                      properties:
+                        name:
+                          description: Name of the original PVC in the volume group
+                            being replicated to this destination
+                          type: string
+                        tempPVCName:
+                          description: Name the replicationdestination should use
+                            for its PVC to replicate into - if not specified, Name
+                            will be used.
+                          type: string
+                      required:
+                      - name
+                      type: object
+                    type: array
                   moverAffinity:
                     description: MoverAffinity allows specifying the PodAffinity that
                       will be used by the data mover
@@ -1429,6 +1453,30 @@ spec:
                       automatically provisioning one. Either this field or both capacity and
                       accessModes must be specified.
                     type: string
+                  destinationPVCGroup:
+                    description: 'TODO: doc'
+                    items:
+                      description: |-
+                        TODO: rename, perhaps move somewhere?
+
+
+                        type DestinationPVCGroup struct {
+                        MemberPVCs []DestinationPVCGroupMember `json:"memberPVCs,omitempty"`
+                        }
+                      properties:
+                        name:
+                          description: Name of the original PVC in the volume group
+                            being replicated to this destination
+                          type: string
+                        tempPVCName:
+                          description: Name the replicationdestination should use
+                            for its PVC to replicate into - if not specified, Name
+                            will be used.
+                          type: string
+                      required:
+                      - name
+                      type: object
+                    type: array
                   moverAffinity:
                     description: MoverAffinity allows specifying the PodAffinity that
                       will be used by the data mover
@@ -2698,9 +2746,13 @@ spec:
                   destinationPVCGroup:
                     description: 'TODO: doc'
                     items:
-                      description: "TODO: rename, perhaps move somewhere? \n type
-                        DestinationPVCGroup struct { MemberPVCs []DestinationPVCGroupMember
-                        `json:\"memberPVCs,omitempty\"` }"
+                      description: |-
+                        TODO: rename, perhaps move somewhere?
+
+
+                        type DestinationPVCGroup struct {
+                        MemberPVCs []DestinationPVCGroupMember `json:"memberPVCs,omitempty"`
+                        }
                       properties:
                         name:
                           description: Name of the original PVC in the volume group
@@ -2871,9 +2923,13 @@ spec:
                   destinationPVCGroup:
                     description: 'TODO: doc'
                     items:
-                      description: "TODO: rename, perhaps move somewhere? \n type
-                        DestinationPVCGroup struct { MemberPVCs []DestinationPVCGroupMember
-                        `json:\"memberPVCs,omitempty\"` }"
+                      description: |-
+                        TODO: rename, perhaps move somewhere?
+
+
+                        type DestinationPVCGroup struct {
+                        MemberPVCs []DestinationPVCGroupMember `json:"memberPVCs,omitempty"`
+                        }
                       properties:
                         name:
                           description: Name of the original PVC in the volume group

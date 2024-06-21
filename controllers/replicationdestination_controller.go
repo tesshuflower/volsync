@@ -23,9 +23,8 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	vgsnapv1alpha1 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumegroupsnapshot/v1alpha1"
 	snapv1 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
-	vgsnapv1alpha1 "github.com/kubernetes-csi/external-snapshotter/client/v6/apis/volumegroupsnapshot/v1alpha1"
-	snapv1 "github.com/kubernetes-csi/external-snapshotter/client/v7/apis/volumesnapshot/v1"
 	"github.com/prometheus/client_golang/prometheus"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -168,12 +167,13 @@ func (r *ReplicationDestinationReconciler) SetupWithManager(mgr ctrl.Manager) er
 		Owns(&rbacv1.Role{}).
 		Owns(&rbacv1.RoleBinding{}).
 		Owns(&snapv1.VolumeSnapshot{}).
-		Owns(&vgsnapv1alpha1.VolumeGroupSnapshot{}). //TODO: will need to only enable this on systems with support
+		Owns(&vgsnapv1alpha1.VolumeGroupSnapshot{}). // TODO: will need to only enable this on systems with support
 		Complete(r)
 }
 
 func newRDMachine(rd *volsyncv1alpha1.ReplicationDestination, c client.Client,
-	l logr.Logger, er events.EventRecorder, privilegedMoverOk bool) (*rdMachine, error) {
+	l logr.Logger, er events.EventRecorder, privilegedMoverOk bool,
+) (*rdMachine, error) {
 	dataMover, err := mover.GetDestinationMoverFromCatalog(c, l, er, rd, privilegedMoverOk)
 	if err != nil {
 		return nil, err

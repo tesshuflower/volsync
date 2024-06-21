@@ -23,9 +23,8 @@ import (
 	"strings"
 
 	"github.com/go-logr/logr"
+	vgsnapv1alpha1 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumegroupsnapshot/v1alpha1"
 	snapv1 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
-	vgsnapv1alpha1 "github.com/kubernetes-csi/external-snapshotter/client/v6/apis/volumegroupsnapshot/v1alpha1"
-	snapv1 "github.com/kubernetes-csi/external-snapshotter/client/v7/apis/volumesnapshot/v1"
 	corev1 "k8s.io/api/core/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -50,7 +49,8 @@ func UnmarkForCleanup(obj metav1.Object) bool {
 // associated with "owner". The "types" array should contain one object of each
 // type to clean up.
 func CleanupObjects(ctx context.Context, c client.Client,
-	logger logr.Logger, owner client.Object, types []client.Object) error {
+	logger logr.Logger, owner client.Object, types []client.Object,
+) error {
 	uid := owner.GetUID()
 	l := logger.WithValues("owned-by", uid)
 	options := []client.DeleteAllOfOption{
@@ -68,7 +68,7 @@ func CleanupObjects(ctx context.Context, c client.Client,
 				l.Error(err, "unable to delete volume snapshot(s)")
 				return err
 			}
-			//TODO: cleanup volumegroupsnapshots too, similarly to volumesnapshots
+			// TODO: cleanup volumegroupsnapshots too, similarly to volumesnapshots
 		} else {
 			err := c.DeleteAllOf(ctx, obj, options...)
 			if client.IgnoreNotFound(err) != nil {
@@ -82,7 +82,8 @@ func CleanupObjects(ctx context.Context, c client.Client,
 
 // Could be generalized to other types if we want to use unstructuredList - would need to pass in group, version, kind
 func cleanupSnapshots(ctx context.Context, c client.Client,
-	logger logr.Logger, owner client.Object) error {
+	logger logr.Logger, owner client.Object,
+) error {
 	// Load current list of snapshots with the cleanup label
 	listOptions := []client.ListOption{
 		client.MatchingLabels{cleanupLabelKey: string(owner.GetUID())},
@@ -98,7 +99,8 @@ func cleanupSnapshots(ctx context.Context, c client.Client,
 }
 
 func CleanupSnapshotsWithLabelCheck(ctx context.Context, c client.Client,
-	logger logr.Logger, owner client.Object, snapList *snapv1.VolumeSnapshotList) error {
+	logger logr.Logger, owner client.Object, snapList *snapv1.VolumeSnapshotList,
+) error {
 	// If marked as do-not-delete, remove the cleanup label and ownership
 	snapsForCleanup, err := relinquishSnapshotsWithDoNotDeleteLabel(ctx, c, logger, owner, snapList)
 	if err != nil {
@@ -137,7 +139,8 @@ func CleanupSnapshotsWithLabelCheck(ctx context.Context, c client.Client,
 
 // TODO: handle volumegroupsnapshots
 func RelinquishOwnedSnapshotsWithDoNotDeleteLabel(ctx context.Context, c client.Client,
-	logger logr.Logger, owner client.Object) error {
+	logger logr.Logger, owner client.Object,
+) error {
 	// Find all snapshots in the namespace with the do not delete label
 	ls, err := labels.Parse(DoNotDeleteLabelKey)
 	if err != nil {
@@ -164,7 +167,8 @@ func RelinquishOwnedSnapshotsWithDoNotDeleteLabel(ctx context.Context, c client.
 // TODO: handle volumegroupsnapshots
 func relinquishSnapshotsWithDoNotDeleteLabel(ctx context.Context, c client.Client,
 	logger logr.Logger, owner client.Object,
-	snapList *snapv1.VolumeSnapshotList) ([]snapv1.VolumeSnapshot, error) {
+	snapList *snapv1.VolumeSnapshotList,
+) ([]snapv1.VolumeSnapshot, error) {
 	remainingSnapshots := []snapv1.VolumeSnapshot{}
 
 	var snapRelinquishErr error
@@ -187,7 +191,8 @@ func relinquishSnapshotsWithDoNotDeleteLabel(ctx context.Context, c client.Clien
 }
 
 func RemoveSnapOwnershipAndLabelsIfRequestedAndUpdate(ctx context.Context, c client.Client, logger logr.Logger,
-	owner client.Object, snapshot *snapv1.VolumeSnapshot) (bool, error) {
+	owner client.Object, snapshot *snapv1.VolumeSnapshot,
+) (bool, error) {
 	ownershipRemoved := false
 
 	if IsMarkedDoNotDelete(snapshot) {
@@ -273,8 +278,10 @@ func hasOtherOwnerRef(obj metav1.Object, owner client.Object) bool {
 	return false
 }
 
+//nolint:funlen
 func MarkOldSnapshotOrGroupSnapshotForCleanup(ctx context.Context, c client.Client, logger logr.Logger,
-	owner metav1.Object, oldImage, latestImage *corev1.TypedLocalObjectReference) error {
+	owner metav1.Object, oldImage, latestImage *corev1.TypedLocalObjectReference,
+) error {
 	// Make sure we only delete an old snapshot (it's a snapshot, but not the
 	// current one)
 

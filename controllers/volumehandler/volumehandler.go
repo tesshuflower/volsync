@@ -24,9 +24,8 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	vgsnapv1alpha1 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumegroupsnapshot/v1alpha1"
 	snapv1 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
-	vgsnapv1alpha1 "github.com/kubernetes-csi/external-snapshotter/client/v6/apis/volumegroupsnapshot/v1alpha1"
-	snapv1 "github.com/kubernetes-csi/external-snapshotter/client/v7/apis/volumesnapshot/v1"
 	corev1 "k8s.io/api/core/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -59,7 +58,7 @@ type VolumeHandler struct {
 	capacity         *resource.Quantity
 	storageClassName *string
 	accessModes      []corev1.PersistentVolumeAccessMode
-	//volumeMode              corev1.PersistentVolumeMode
+	// volumeMode              corev1.PersistentVolumeMode
 	volumeSnapshotClassName *string
 }
 
@@ -69,8 +68,9 @@ func (vh VolumeHandler) EnsurePVCsFromSrc(ctx context.Context, log logr.Logger,
 */
 
 func (vh *VolumeHandler) EnsureGroupPVCsFromSrc(ctx context.Context, log logr.Logger,
-	pvcLabelSelector *metav1.LabelSelector, groupName string, isTemporary bool) (map[string]*corev1.PersistentVolumeClaim, error) {
-	//TODO: do we care to check if the copyMethod is snapshot?  It will need to be unless we support
+	pvcLabelSelector *metav1.LabelSelector, groupName string, isTemporary bool,
+) (map[string]*corev1.PersistentVolumeClaim, error) {
+	// TODO: do we care to check if the copyMethod is snapshot?  It will need to be unless we support
 	// passing in a list of PVCs or an existing volumegroupsnapshot?
 
 	groupSnap, err := vh.ensureGroupSnapshot(ctx, log, pvcLabelSelector, groupName, isTemporary)
@@ -87,7 +87,8 @@ func (vh *VolumeHandler) EnsureGroupPVCsFromSrc(ctx context.Context, log logr.Lo
 // be the same PVC as src. Note: it's possible to return nil, nil. In this case,
 // the operation should be retried.
 func (vh *VolumeHandler) EnsurePVCFromSrc(ctx context.Context, log logr.Logger,
-	src *corev1.PersistentVolumeClaim, name string, isTemporary bool) (*corev1.PersistentVolumeClaim, error) {
+	src *corev1.PersistentVolumeClaim, name string, isTemporary bool,
+) (*corev1.PersistentVolumeClaim, error) {
 	switch vh.copyMethod {
 	case volsyncv1alpha1.CopyMethodNone:
 		fallthrough // Same as CopyMethodDirect
@@ -106,10 +107,11 @@ func (vh *VolumeHandler) EnsurePVCFromSrc(ctx context.Context, log logr.Logger,
 	}
 }
 
+//nolint:funlen
 func (vh *VolumeHandler) EnsureImages(ctx context.Context, log logr.Logger,
 	srcPVCs map[string]*corev1.PersistentVolumeClaim,
-	srcPVCSelector *metav1.LabelSelector) (*corev1.TypedLocalObjectReference, error) {
-
+	srcPVCSelector *metav1.LabelSelector,
+) (*corev1.TypedLocalObjectReference, error) {
 	// For non-volumegroup cases, src is just the first(only) pvc
 	var src *corev1.PersistentVolumeClaim
 	for _, srcPVC := range srcPVCs {
@@ -127,7 +129,7 @@ func (vh *VolumeHandler) EnsureImages(ctx context.Context, log logr.Logger,
 			Name:     src.Name,
 		}, nil
 	case volsyncv1alpha1.CopyMethodSnapshot:
-		//FIXME: volume group handling is here - which means it'll only work if CopyMethod=Snapshot
+		// FIXME: volume group handling is here - which means it'll only work if CopyMethod=Snapshot
 		var snapObj client.Object
 		var snapObjKind string
 		var snapObjAPIGroup *string
@@ -179,7 +181,8 @@ func (vh *VolumeHandler) EnsureImages(ctx context.Context, log logr.Logger,
 // as src.
 // TODO: remove - replace with ensureImages() above
 func (vh *VolumeHandler) EnsureImage(ctx context.Context, log logr.Logger,
-	src *corev1.PersistentVolumeClaim) (*corev1.TypedLocalObjectReference, error) {
+	src *corev1.PersistentVolumeClaim,
+) (*corev1.TypedLocalObjectReference, error) {
 	switch vh.copyMethod { //nolint: exhaustive
 	case volsyncv1alpha1.CopyMethodNone:
 		fallthrough // Same as CopyMethodDirect
@@ -235,7 +238,8 @@ func (vh *VolumeHandler) getPVCByName(ctx context.Context, pvcName string) (*cor
 
 // nolint: funlen
 func (vh *VolumeHandler) EnsureNewPVC(ctx context.Context, log logr.Logger,
-	name string, pvcLabels map[string]string) (*corev1.PersistentVolumeClaim, error) {
+	name string, pvcLabels map[string]string,
+) (*corev1.PersistentVolumeClaim, error) {
 	logger := log.WithValues("PVC", name)
 
 	// Ensure required configuration parameters have been provided in order to
@@ -308,28 +312,30 @@ func (vh *VolumeHandler) GetAccessModes() []corev1.PersistentVolumeAccessMode {
 	return vh.accessModes
 }
 
+//nolint:funlen
 func (vh *VolumeHandler) ensureImageGroupSnapshot(ctx context.Context, log logr.Logger,
 	pvcs map[string]*corev1.PersistentVolumeClaim,
-	pvcLabelSelector *metav1.LabelSelector) (*vgsnapv1alpha1.VolumeGroupSnapshot, error) {
+	pvcLabelSelector *metav1.LabelSelector,
+) (*vgsnapv1alpha1.VolumeGroupSnapshot, error) {
 	// create & record name (if necessary)
 	groupSnapName := ""
 	for _, pvc := range pvcs {
 		// See if we already have a vg snap name annotated on one of the PVCs
 		if name, ok := pvc.Annotations[groupSnapshotAnnotation]; ok {
-			log.Info("### VGSNAP using existing annotation ###", "existing name", name) //FIXME: remove
+			log.Info("### VGSNAP using existing annotation ###", "existing name", name) // FIXME: remove
 			groupSnapName = name
 			break
 		}
 	}
 	if groupSnapName == "" {
-		log.Info("### VGSNAP Creating new VGSNAP name") //FIXME: remove
+		log.Info("### VGSNAP Creating new VGSNAP name") // FIXME: remove
 		// no annotation set yet on any of the pvcs
 		ts := time.Now().Format(timeYYYYMMDDHHMMSS)
 		groupSnapName = vh.owner.GetName() + "-" + ts
 	}
 	// Make sure all the pvcs in the group have the annotation
 	for _, pvc := range pvcs {
-		log.Info("### VGSNAP - going to annotate pvcs ###", "vgSnapName", groupSnapName) //FIXME: remove
+		log.Info("### VGSNAP - going to annotate pvcs ###", "vgSnapName", groupSnapName) // FIXME: remove
 		if name, ok := pvc.Annotations[groupSnapshotAnnotation]; !ok || name != groupSnapName {
 			pvc.Annotations[groupSnapshotAnnotation] = groupSnapName
 			if err := vh.client.Update(ctx, pvc); err != nil {
@@ -362,9 +368,9 @@ func (vh *VolumeHandler) ensureImageGroupSnapshot(ctx context.Context, log logr.
 		if groupSnap.CreationTimestamp.IsZero() {
 			groupSnap.Spec = vgsnapv1alpha1.VolumeGroupSnapshotSpec{
 				Source: vgsnapv1alpha1.VolumeGroupSnapshotSource{
-					Selector: *pvcLabelSelector,
+					Selector: pvcLabelSelector,
 				},
-				//FIXME: VolumeGroupSnapshotClassName: vh.VolumeGroupSnapshotClassName,
+				// FIXME: VolumeGroupSnapshotClassName: vh.VolumeGroupSnapshotClassName,
 			}
 		}
 		return nil
@@ -399,7 +405,8 @@ func (vh *VolumeHandler) ensureImageGroupSnapshot(ctx context.Context, log logr.
 
 // nolint: funlen
 func (vh *VolumeHandler) ensureImageSnapshot(ctx context.Context, log logr.Logger,
-	src *corev1.PersistentVolumeClaim) (*snapv1.VolumeSnapshot, error) {
+	src *corev1.PersistentVolumeClaim,
+) (*snapv1.VolumeSnapshot, error) {
 	// create & record name (if necessary)
 	if src.Annotations == nil {
 		src.Annotations = make(map[string]string)
@@ -489,7 +496,9 @@ func (vh *VolumeHandler) RemoveSnapshotAnnotationFromPVC(ctx context.Context, lo
 	return nil
 }
 
-func (vh *VolumeHandler) RemoveGroupSnapshotAnnotationFromPVC(ctx context.Context, log logr.Logger, pvcName string) error {
+func (vh *VolumeHandler) RemoveGroupSnapshotAnnotationFromPVC(ctx context.Context, log logr.Logger,
+	pvcName string,
+) error {
 	pvc, err := vh.getPVCByName(ctx, pvcName)
 	if err != nil {
 		if kerrors.IsNotFound(err) {
@@ -508,7 +517,8 @@ func (vh *VolumeHandler) RemoveGroupSnapshotAnnotationFromPVC(ctx context.Contex
 
 // nolint: funlen
 func (vh *VolumeHandler) ensureClone(ctx context.Context, log logr.Logger,
-	src *corev1.PersistentVolumeClaim, name string, isTemporary bool) (*corev1.PersistentVolumeClaim, error) {
+	src *corev1.PersistentVolumeClaim, name string, isTemporary bool,
+) (*corev1.PersistentVolumeClaim, error) {
 	clone := &corev1.PersistentVolumeClaim{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
@@ -614,8 +624,10 @@ func (vh *VolumeHandler) ensureClone(ctx context.Context, log logr.Logger,
 	return clone, err
 }
 
+//nolint:funlen
 func (vh *VolumeHandler) ensureGroupSnapshot(ctx context.Context, log logr.Logger,
-	pvcLabelSelector *metav1.LabelSelector, groupName string, isTemporary bool) (*vgsnapv1alpha1.VolumeGroupSnapshot, error) {
+	pvcLabelSelector *metav1.LabelSelector, groupName string, isTemporary bool,
+) (*vgsnapv1alpha1.VolumeGroupSnapshot, error) {
 	groupSnap := &vgsnapv1alpha1.VolumeGroupSnapshot{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      groupName,
@@ -636,9 +648,9 @@ func (vh *VolumeHandler) ensureGroupSnapshot(ctx context.Context, log logr.Logge
 		if groupSnap.CreationTimestamp.IsZero() {
 			groupSnap.Spec = vgsnapv1alpha1.VolumeGroupSnapshotSpec{
 				Source: vgsnapv1alpha1.VolumeGroupSnapshotSource{
-					Selector: *pvcLabelSelector,
+					Selector: pvcLabelSelector,
 				},
-				//FIXME: VolumeGroupSnapshotClassName: vh.VolumeGroupSnapshotClassName,
+				// FIXME: VolumeGroupSnapshotClassName: vh.VolumeGroupSnapshotClassName,
 			}
 		}
 		return nil
@@ -680,101 +692,42 @@ func (vh *VolumeHandler) ensureGroupSnapshot(ctx context.Context, log logr.Logge
 }
 
 func (vh *VolumeHandler) pvcsFromGroupSnapshot(ctx context.Context, log logr.Logger,
-	groupSnap *vgsnapv1alpha1.VolumeGroupSnapshot, isTemporary bool) (map[string]*corev1.PersistentVolumeClaim, error) {
-	//TODO: match the volumesnapshot in the snapshot to the original PVC
-	// and then create the pvc from snapshot
-
+	groupSnap *vgsnapv1alpha1.VolumeGroupSnapshot, isTemporary bool,
+) (map[string]*corev1.PersistentVolumeClaim, error) {
 	if groupSnap.Status == nil || groupSnap.Status.BoundVolumeGroupSnapshotContentName == nil {
 		// Shouldn't happen, we check for this already in ensureGroupSnapshot()
 		return nil, nil
 	}
 
-	//TODO: volumegroupsnapshot not providing any easy way to map between
-	// The volumesnapshots it creates and the pvcs they were taken from
-	// see issue: https://github.com/kubernetes-csi/external-snapshotter/issues/969
-	//TODO: For now, doing lookups the hard way
-	groupSnapContent := &vgsnapv1alpha1.VolumeGroupSnapshotContent{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: *groupSnap.Status.BoundVolumeGroupSnapshotContentName,
-		},
-	}
-	err := vh.client.Get(ctx, client.ObjectKeyFromObject(groupSnapContent), groupSnapContent)
-	if err != nil {
-		return nil, err
-	}
-
-	if groupSnapContent.Status == nil {
-		// Not ready yet (should not happen since groupsnap is bound)
-		return nil, nil
-	}
-
-	sourcePVNames := groupSnapContent.Spec.Source.PersistentVolumeNames
-	if len(sourcePVNames) == 0 {
-		return nil, fmt.Errorf("No PVCs were snapshotted in volume group snapshot")
-	}
-	snapContentRefList := groupSnapContent.Status.VolumeSnapshotContentRefList
-
-	if len(snapContentRefList) != len(sourcePVNames) {
-		// Also should not happen - assume groupsnapcontent is not ready
-		return nil, nil
-	}
-
+	// Match each volumesnapshot in the group snapshot to the original PVC and then create a pvc from snapshot
 	pvcsFromSnapMap := map[string]*corev1.PersistentVolumeClaim{}
+	for _, pvcToSnapPair := range groupSnap.Status.PVCVolumeSnapshotRefList {
+		sourcePVCName := pvcToSnapPair.PersistentVolumeClaimRef.Name
+		sourcePVCSnapName := pvcToSnapPair.VolumeSnapshotRef.Name
 
-	// Now need to identify the original PVC from the PV
-	for i := range sourcePVNames {
-		sourcePVName := sourcePVNames[i]
-		sourcePV := &corev1.PersistentVolume{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: sourcePVName,
-			},
-		}
-		err := vh.client.Get(ctx, client.ObjectKeyFromObject(sourcePV), sourcePV)
-		if err != nil {
-			return nil, err
-		}
-		if sourcePV.Spec.ClaimRef == nil {
-			return nil, fmt.Errorf("PV from groupsnapshot does not have claimref to source pvc %s", sourcePV)
+		if sourcePVCName == "" || sourcePVCSnapName == "" {
+			// Refs not correct in the status, shouldn't happen
+			continue
 		}
 
 		sourcePVC := &corev1.PersistentVolumeClaim{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      sourcePV.Spec.ClaimRef.Name,
+				Name:      sourcePVCName,
 				Namespace: vh.owner.GetNamespace(),
 			},
 		}
-		err = vh.client.Get(ctx, client.ObjectKeyFromObject(sourcePVC), sourcePVC)
+		err := vh.client.Get(ctx, client.ObjectKeyFromObject(sourcePVC), sourcePVC)
 		if err != nil {
 			return nil, err
 		}
 
-		// Now we have a source PVC, find the corresponding volumesnapshot from the
-		// volumesnapshot contents
-		snapshotContentsRef := snapContentRefList[i] // Should match with sourcePVNames[i]
-		//TODO: doublecheck kind and namespace are expected?
-		snapContents := &snapv1.VolumeSnapshotContent{
+		sourcePVCSnap := &snapv1.VolumeSnapshot{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      snapshotContentsRef.Name,
+				Name:      sourcePVCSnapName,
 				Namespace: vh.owner.GetNamespace(),
 			},
 		}
-		err = vh.client.Get(ctx, client.ObjectKeyFromObject(snapContents), snapContents)
-		if err != nil {
-			return nil, err
-		}
-
-		//TODO: check volsnapshotref kind and namespace?
-		if snapContents.Spec.VolumeSnapshotRef.Name == "" {
-			// Shouldn't happen
-			return nil, fmt.Errorf("snapshotcontents %s does not proper volumesnapshotref", snapContents.GetName())
-		}
-		snap := &snapv1.VolumeSnapshot{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      snapContents.Spec.VolumeSnapshotRef.Name,
-				Namespace: vh.owner.GetNamespace(),
-			},
-		}
-		err = vh.client.Get(ctx, client.ObjectKeyFromObject(snap), snap)
+		err = vh.client.Get(ctx, client.ObjectKeyFromObject(sourcePVCSnap), sourcePVCSnap)
 		if err != nil {
 			return nil, err
 		}
@@ -783,7 +736,7 @@ func (vh *VolumeHandler) pvcsFromGroupSnapshot(ctx context.Context, log logr.Log
 		// Next, create a new temp pvc from snap to get our point in time copy of the source pvc
 		tempPVCName := mover.VolSyncPrefix + vh.owner.GetName() + "-" + sourcePVC.GetName()
 
-		tempPVC, err := vh.pvcFromSnapshot(ctx, log, snap, sourcePVC, tempPVCName, isTemporary)
+		tempPVC, err := vh.pvcFromSnapshot(ctx, log, sourcePVCSnap, sourcePVC, tempPVCName, isTemporary)
 		if tempPVC == nil || err != nil {
 			return nil, err
 		}
@@ -791,12 +744,19 @@ func (vh *VolumeHandler) pvcsFromGroupSnapshot(ctx context.Context, log logr.Log
 		pvcsFromSnapMap[sourcePVC.GetName() /*original PVC*/] = tempPVC
 	}
 
+	if len(pvcsFromSnapMap) == 0 {
+		log.Info("VolumeGroupSnapshot has no valid PVCVolumeSnapshotRefs, unable to create PVCs from group snapshot",
+			"volume group snap name", groupSnap.GetName(), "namespace", groupSnap.GetNamespace())
+		return nil, nil
+	}
+
 	return pvcsFromSnapMap, nil
 }
 
 // nolint: funlen
 func (vh *VolumeHandler) ensureSnapshot(ctx context.Context, log logr.Logger,
-	src *corev1.PersistentVolumeClaim, name string, isTemporary bool) (*snapv1.VolumeSnapshot, error) {
+	src *corev1.PersistentVolumeClaim, name string, isTemporary bool,
+) (*snapv1.VolumeSnapshot, error) {
 	snap := &snapv1.VolumeSnapshot{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
@@ -882,7 +842,8 @@ func (vh *VolumeHandler) ensureSnapshot(ctx context.Context, log logr.Logger,
 //
 //nolint:funlen
 func (vh *VolumeHandler) waitForCopyTriggerBeforeCloneOrSnap(ctx context.Context, log logr.Logger,
-	srcPVC *corev1.PersistentVolumeClaim) (bool, error) {
+	srcPVC *corev1.PersistentVolumeClaim,
+) (bool, error) {
 	if !utils.PVCUsesCopyTrigger(srcPVC) {
 		// No need to wait
 		return false, nil
@@ -952,7 +913,8 @@ func (vh *VolumeHandler) waitForCopyTriggerBeforeCloneOrSnap(ctx context.Context
 }
 
 func (vh *VolumeHandler) updateCopyTriggerAfterCloneOrSnap(ctx context.Context,
-	srcPVC *corev1.PersistentVolumeClaim) error {
+	srcPVC *corev1.PersistentVolumeClaim,
+) error {
 	if !utils.PVCUsesCopyTrigger(srcPVC) {
 		// Nothing to update
 		return nil
@@ -976,7 +938,8 @@ func (vh *VolumeHandler) updateCopyTriggerAfterCloneOrSnap(ctx context.Context,
 // nolint: funlen
 func (vh *VolumeHandler) pvcFromSnapshot(ctx context.Context, log logr.Logger,
 	snap *snapv1.VolumeSnapshot, original *corev1.PersistentVolumeClaim,
-	name string, isTemporary bool) (*corev1.PersistentVolumeClaim, error) {
+	name string, isTemporary bool,
+) (*corev1.PersistentVolumeClaim, error) {
 	pvc := &corev1.PersistentVolumeClaim{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,

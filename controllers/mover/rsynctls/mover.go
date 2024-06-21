@@ -47,7 +47,8 @@ import (
 )
 
 const (
-	baseMountPath    = "/data"
+	mountPath        = "/data"
+	baseMountPath    = mountPath //FIXME: remove
 	devicePath       = "/dev/block"
 	dataVolumeName   = "data"
 	tlsContainerPort = 8000
@@ -95,6 +96,7 @@ var cleanupTypes = []client.Object{
 
 func (m *Mover) Name() string { return "rsync-tls" }
 
+//nolint:funlen
 func (m *Mover) Synchronize(ctx context.Context) (mover.Result, error) {
 	var err error
 
@@ -135,8 +137,9 @@ func (m *Mover) Synchronize(ctx context.Context) (mover.Result, error) {
 	jobs := map[string]*batchv1.Job{}
 	for i, pvcName := range pvcNamesSorted {
 		jobName := volSyncRsyncTLSPrefix + m.direction() + "-" + m.owner.GetName() + "-" + strconv.Itoa(i)
-		job, err := m.ensureJob(ctx, jobName, dataPVCGroup.GetPVCByName(pvcName), pvcName, /* original pvc name from the src */
-			len(pvcNamesSorted) /*pvcCount*/, namedTargetPortsMapping, sa, *rsyncPSKSecretName)
+		job, err := m.ensureJob(ctx, jobName, dataPVCGroup.GetPVCByName(pvcName),
+			pvcName /* original pvc name from the src */, len(pvcNamesSorted), /*pvcCount*/
+			namedTargetPortsMapping, sa, *rsyncPSKSecretName)
 		if err != nil {
 			return mover.InProgress(), err
 		}
@@ -210,11 +213,11 @@ func (m *Mover) ensureServiceAndPublishAddress(ctx context.Context, pvcGroup *pv
 		return false, namedTargetPortsMapping, err
 	}
 
-	a, err := m.publishSvcAddress(service)
-	return a, namedTargetPortsMapping, err
+	a := m.publishSvcAddress(service)
+	return a, namedTargetPortsMapping, nil
 }
 
-func (m *Mover) publishSvcAddress(service *corev1.Service) (bool, error) {
+func (m *Mover) publishSvcAddress(service *corev1.Service) bool {
 	address := utils.GetServiceAddress(service)
 	if address == "" {
 		// We don't have an address yet, try again later
@@ -225,12 +228,12 @@ func (m *Mover) publishSvcAddress(service *corev1.Service) (bool, error) {
 				"waiting for an address to be assigned to %s; ensure the proper serviceType was specified",
 				utils.KindAndName(m.client.Scheme(), service))
 		}
-		return false, nil
+		return false
 	}
 	m.updateStatusAddress(&address)
 
 	m.logger.V(1).Info("Service addr published", "address", address)
-	return true, nil
+	return true
 }
 
 func (m *Mover) updateStatusAddress(address *string) {
@@ -415,48 +418,6 @@ func (m *Mover) ensureSourcePVCs(ctx context.Context) (*pvcGroup, error) {
 			return nil, err
 		}
 		srcPVCGroup.pvcs = snapGrpPVCs
-
-		/*
-			//FIXME: temp workaround without volumegroup stuff
-			// 1. lookup PVCs by selector
-			pvcSelector, err := metav1.LabelSelectorAsSelector(&m.mainPVCGroupSelector.Selector)
-			if err != nil {
-				m.logger.Error(err, "Unable to parse pvc volume group selector")
-				return nil, err
-			}
-			listOptions := []client.ListOption{
-				client.MatchingLabelsSelector{
-					Selector: pvcSelector,
-				},
-				client.InNamespace(m.owner.GetNamespace()),
-			}
-			pvcGroupList := &corev1.PersistentVolumeClaimList{}
-			err = m.client.List(ctx, pvcGroupList, listOptions...)
-			if err != nil {
-				return nil, err
-			}
-
-			if len(pvcGroupList.Items) == 0 {
-				return nil, fmt.Errorf("No src PVCs found")
-			}
-
-			srcPVCGroup.pvcs = map[string]*corev1.PersistentVolumeClaim{}
-
-			// 2. take individual snapshots (reusing vh code temporarily - will only work for CopyMode: Snapshot)
-			for i := range pvcGroupList.Items {
-				srcPVC := &pvcGroupList.Items[i]
-				dataName := mover.VolSyncPrefix + m.owner.GetName() + "-" + m.direction() + "-" + srcPVC.GetName()
-				pvcSnapshotted, err := m.vh.EnsurePVCFromSrc(ctx, m.logger, srcPVC, dataName, true)
-				if err != nil || pvcSnapshotted == nil {
-					//don't care if these are going to happen 1 at a time, will be replaced with volumesnapshot
-					return nil, err
-				}
-				// srcPVC is the orignal source PVC
-				srcPVCGroup.pvcs[srcPVC.GetName()] = pvcSnapshotted
-			}
-			//FIXME: end - should take a volumegroupsnapshot instead
-		*/
-
 	} else {
 		srcPVCGroup.isVolumeGroup = false
 

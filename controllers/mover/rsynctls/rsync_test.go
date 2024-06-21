@@ -868,9 +868,10 @@ var _ = Describe("RsyncTLS as a source", func() {
 			JustBeforeEach(func() {
 				// No service should be created regardless here as this is the replicationsource
 				// enasureServiecAndPublishAddress should return true,nil immediately
-				result, err := mover.ensureServiceAndPublishAddress(ctx)
+				result, tgtPortMapping, err := mover.ensureServiceAndPublishAddress(ctx, &pvcGroup{})
 				Expect(err).To(BeNil())
 				Expect(result).To(BeTrue())
+				Expect(tgtPortMapping).To(Equal(""))
 
 				svc := &corev1.Service{
 					ObjectMeta: metav1.ObjectMeta{
@@ -1077,6 +1078,8 @@ var _ = Describe("RsyncTLS as a source", func() {
 
 		Context("Mover Job is handled properly", func() {
 			var jobName string
+			var pvcCount = 1
+			var tgtPortMapping = ""
 			var sa *corev1.ServiceAccount
 			var tlsKeySecret *corev1.Secret
 			var job *batchv1.Job
@@ -1129,7 +1132,8 @@ var _ = Describe("RsyncTLS as a source", func() {
 			})
 			When("it's the initial sync", func() {
 				It("should have the command defined properly", func() {
-					j, e := mover.ensureJob(ctx, sPVC, sa, tlsKeySecret.GetName()) // Using sPVC as dataPVC (i.e. direct)
+					j, e := mover.ensureJob(ctx, jobName, sPVC, sPVC.GetName(), pvcCount, tgtPortMapping, sa,
+						tlsKeySecret.GetName()) // Using sPVC as dataPVC (i.e. direct)
 					Expect(e).NotTo(HaveOccurred())
 					Expect(j).To(BeNil()) // hasn't completed
 					nsn := types.NamespacedName{Name: jobName, Namespace: ns.Name}
@@ -1141,7 +1145,8 @@ var _ = Describe("RsyncTLS as a source", func() {
 				})
 
 				It("should use the specified container image", func() {
-					j, e := mover.ensureJob(ctx, sPVC, sa, tlsKeySecret.GetName()) // Using sPVC as dataPVC (i.e. direct)
+					j, e := mover.ensureJob(ctx, jobName, sPVC, sPVC.GetName(), pvcCount, tgtPortMapping, sa,
+						tlsKeySecret.GetName()) // Using sPVC as dataPVC (i.e. direct)
 					Expect(e).NotTo(HaveOccurred())
 					Expect(j).To(BeNil()) // hasn't completed
 					nsn := types.NamespacedName{Name: jobName, Namespace: ns.Name}
@@ -1152,7 +1157,8 @@ var _ = Describe("RsyncTLS as a source", func() {
 				})
 
 				It("should use the specified service account", func() {
-					j, e := mover.ensureJob(ctx, sPVC, sa, tlsKeySecret.GetName()) // Using sPVC as dataPVC (i.e. direct)
+					j, e := mover.ensureJob(ctx, jobName, sPVC, sPVC.GetName(), pvcCount, tgtPortMapping, sa,
+						tlsKeySecret.GetName()) // Using sPVC as dataPVC (i.e. direct)
 					Expect(e).NotTo(HaveOccurred())
 					Expect(j).To(BeNil()) // hasn't completed
 					nsn := types.NamespacedName{Name: jobName, Namespace: ns.Name}
@@ -1170,7 +1176,8 @@ var _ = Describe("RsyncTLS as a source", func() {
 				}
 
 				It("Should have correct volume mounts", func() {
-					j, e := mover.ensureJob(ctx, sPVC, sa, tlsKeySecret.GetName()) // Using sPVC as dataPVC (i.e. direct)
+					j, e := mover.ensureJob(ctx, jobName, sPVC, sPVC.GetName(), pvcCount, tgtPortMapping, sa,
+						tlsKeySecret.GetName()) // Using sPVC as dataPVC (i.e. direct)
 					Expect(e).NotTo(HaveOccurred())
 					Expect(j).To(BeNil()) // hasn't completed
 					nsn := types.NamespacedName{Name: jobName, Namespace: ns.Name}
@@ -1203,7 +1210,8 @@ var _ = Describe("RsyncTLS as a source", func() {
 				DescribeTable("Should have correct volumes", func(getPVC func() *corev1.PersistentVolumeClaim) {
 					pvc := getPVC()
 					Expect(pvc).ToNot(BeNil())
-					j, e := mover.ensureJob(ctx, pvc, sa, tlsKeySecret.GetName()) // Using pvc as dataPVC (i.e. direct)
+					j, e := mover.ensureJob(ctx, jobName, pvc, pvc.GetName(), pvcCount, tgtPortMapping, sa,
+						tlsKeySecret.GetName()) // Using pvc as dataPVC (i.e. direct)
 					Expect(e).NotTo(HaveOccurred())
 					Expect(j).To(BeNil()) // hasn't completed
 					nsn := types.NamespacedName{Name: jobName, Namespace: ns.Name}
@@ -1240,7 +1248,8 @@ var _ = Describe("RsyncTLS as a source", func() {
 
 				When("The source PVC has volumeMode: block", func() {
 					It("Should have correct volume mounts, and device mount", func() {
-						j, e := mover.ensureJob(ctx, sBlockPVC, sa, tlsKeySecret.GetName()) // Using sBlockPVC as dataPVC (i.e. direct)
+						j, e := mover.ensureJob(ctx, jobName, sBlockPVC, sBlockPVC.GetName(), pvcCount, tgtPortMapping,
+							sa, tlsKeySecret.GetName()) // Using sPVC as dataPVC (i.e. direct)
 						Expect(e).NotTo(HaveOccurred())
 						Expect(j).To(BeNil()) // hasn't completed
 						nsn := types.NamespacedName{Name: jobName, Namespace: ns.Name}
@@ -1306,7 +1315,8 @@ var _ = Describe("RsyncTLS as a source", func() {
 						Expect(k8sClient.Create(ctx, roxPVC)).To(Succeed())
 					})
 					It("Mover job should mount the PVC as read-only", func() {
-						j, e := mover.ensureJob(ctx, roxPVC, sa, tlsKeySecret.GetName()) // Using sPVC as dataPVC (i.e. direct)
+						j, e := mover.ensureJob(ctx, jobName, roxPVC, roxPVC.GetName(), pvcCount, tgtPortMapping, sa,
+							tlsKeySecret.GetName()) // Using sPVC as dataPVC (i.e. direct)
 						Expect(e).NotTo(HaveOccurred())
 						Expect(j).To(BeNil()) // hasn't completed
 						nsn := types.NamespacedName{Name: jobName, Namespace: ns.Name}
@@ -1328,7 +1338,8 @@ var _ = Describe("RsyncTLS as a source", func() {
 				})
 
 				It("Should have correct labels", func() {
-					j, e := mover.ensureJob(ctx, sPVC, sa, tlsKeySecret.GetName()) // Using sPVC as dataPVC (i.e. direct)
+					j, e := mover.ensureJob(ctx, jobName, sPVC, sPVC.GetName(), pvcCount, tgtPortMapping, sa,
+						tlsKeySecret.GetName()) // Using sPVC as dataPVC (i.e. direct)
 					Expect(e).NotTo(HaveOccurred())
 					Expect(j).To(BeNil()) // hasn't completed
 					nsn := types.NamespacedName{Name: jobName, Namespace: ns.Name}
@@ -1340,7 +1351,8 @@ var _ = Describe("RsyncTLS as a source", func() {
 				})
 
 				It("Should not have container resourceRequirements set by default", func() {
-					j, e := mover.ensureJob(ctx, sPVC, sa, tlsKeySecret.GetName()) // Using sPVC as dataPVC (i.e. direct)
+					j, e := mover.ensureJob(ctx, jobName, sPVC, sPVC.GetName(), pvcCount, tgtPortMapping, sa,
+						tlsKeySecret.GetName()) // Using sPVC as dataPVC (i.e. direct)
 					Expect(e).NotTo(HaveOccurred())
 					Expect(j).To(BeNil()) // hasn't completed
 					nsn := types.NamespacedName{Name: jobName, Namespace: ns.Name}
@@ -1361,7 +1373,8 @@ var _ = Describe("RsyncTLS as a source", func() {
 						}
 					})
 					It("Should use them in the mover job container", func() {
-						j, e := mover.ensureJob(ctx, sPVC, sa, tlsKeySecret.GetName()) // Using sPVC as dataPVC (i.e. direct)
+						j, e := mover.ensureJob(ctx, jobName, sPVC, sPVC.GetName(), pvcCount, tgtPortMapping, sa,
+							tlsKeySecret.GetName()) // Using sPVC as dataPVC (i.e. direct)
 						Expect(e).NotTo(HaveOccurred())
 						Expect(j).To(BeNil()) // hasn't completed
 						nsn := types.NamespacedName{Name: jobName, Namespace: ns.Name}
@@ -1384,7 +1397,8 @@ var _ = Describe("RsyncTLS as a source", func() {
 				})
 
 				It("should support pausing", func() {
-					j, e := mover.ensureJob(ctx, sPVC, sa, tlsKeySecret.GetName()) // Using sPVC as dataPVC (i.e. direct)
+					j, e := mover.ensureJob(ctx, jobName, sPVC, sPVC.GetName(), pvcCount, tgtPortMapping, sa,
+						tlsKeySecret.GetName()) // Using sPVC as dataPVC (i.e. direct)
 					Expect(e).NotTo(HaveOccurred())
 					Expect(j).To(BeNil()) // hasn't completed
 					nsn := types.NamespacedName{Name: jobName, Namespace: ns.Name}
@@ -1393,14 +1407,16 @@ var _ = Describe("RsyncTLS as a source", func() {
 					Expect(*job.Spec.Parallelism).To(Equal(int32(1)))
 
 					mover.paused = true
-					j, e = mover.ensureJob(ctx, sPVC, sa, tlsKeySecret.GetName()) // Using sPVC as dataPVC (i.e. direct)
+					j, e = mover.ensureJob(ctx, jobName, sPVC, sPVC.GetName(), pvcCount, tgtPortMapping, sa,
+						tlsKeySecret.GetName()) // Using sPVC as dataPVC (i.e. direct)
 					Expect(e).NotTo(HaveOccurred())
 					Expect(j).To(BeNil()) // hasn't completed
 					Expect(k8sClient.Get(ctx, nsn, job)).To(Succeed())
 					Expect(*job.Spec.Parallelism).To(Equal(int32(0)))
 
 					mover.paused = false
-					j, e = mover.ensureJob(ctx, sPVC, sa, tlsKeySecret.GetName()) // Using sPVC as dataPVC (i.e. direct)
+					j, e = mover.ensureJob(ctx, jobName, sPVC, sPVC.GetName(), pvcCount, tgtPortMapping, sa,
+						tlsKeySecret.GetName()) // Using sPVC as dataPVC (i.e. direct)
 					Expect(e).NotTo(HaveOccurred())
 					Expect(j).To(BeNil()) // hasn't completed
 					Expect(k8sClient.Get(ctx, nsn, job)).To(Succeed())
@@ -1416,7 +1432,8 @@ var _ = Describe("RsyncTLS as a source", func() {
 					rs.Spec.RsyncTLS.Address = &address
 				})
 				It("should have the correct env vars when address is set in spec", func() {
-					j, e := mover.ensureJob(ctx, sPVC, sa, tlsKeySecret.GetName()) // Using sPVC as dataPVC (i.e. direct)
+					j, e := mover.ensureJob(ctx, jobName, sPVC, sPVC.GetName(), pvcCount, tgtPortMapping, sa,
+						tlsKeySecret.GetName()) // Using sPVC as dataPVC (i.e. direct)
 					Expect(e).NotTo(HaveOccurred())
 					Expect(j).To(BeNil()) // hasn't completed
 					nsn := types.NamespacedName{Name: jobName, Namespace: ns.Name}
@@ -1441,7 +1458,8 @@ var _ = Describe("RsyncTLS as a source", func() {
 					rs.Spec.RsyncTLS.Port = &port
 				})
 				It("should have the correct env vars when address is set in spec", func() {
-					j, e := mover.ensureJob(ctx, sPVC, sa, tlsKeySecret.GetName()) // Using sPVC as dataPVC (i.e. direct)
+					j, e := mover.ensureJob(ctx, jobName, sPVC, sPVC.GetName(), pvcCount, tgtPortMapping, sa,
+						tlsKeySecret.GetName()) // Using sPVC as dataPVC (i.e. direct)
 					Expect(e).NotTo(HaveOccurred())
 					Expect(j).To(BeNil()) // hasn't completed
 					nsn := types.NamespacedName{Name: jobName, Namespace: ns.Name}
@@ -1460,7 +1478,8 @@ var _ = Describe("RsyncTLS as a source", func() {
 					mover.containerImage = "my-rsync-mover-image"
 
 					// Initial job creation
-					j, e := mover.ensureJob(ctx, sPVC, sa, tlsKeySecret.GetName()) // Using sPVC as dataPVC (i.e. direct)
+					j, e := mover.ensureJob(ctx, jobName, sPVC, sPVC.GetName(), pvcCount, tgtPortMapping, sa,
+						tlsKeySecret.GetName()) // Using sPVC as dataPVC (i.e. direct)
 					Expect(e).NotTo(HaveOccurred())
 					Expect(j).To(BeNil()) // hasn't completed
 
@@ -1478,7 +1497,8 @@ var _ = Describe("RsyncTLS as a source", func() {
 					mover.containerImage = myUpdatedImage
 
 					// Mover should get immutable err for updating the image and then delete the job
-					j, e := mover.ensureJob(ctx, sPVC, sa, tlsKeySecret.GetName()) // Using sPVC as dataPVC (i.e. direct)
+					j, e := mover.ensureJob(ctx, jobName, sPVC, sPVC.GetName(), pvcCount, tgtPortMapping, sa,
+						tlsKeySecret.GetName()) // Using sPVC as dataPVC (i.e. direct)
 					Expect(e).To(HaveOccurred())
 					Expect(j).To(BeNil())
 
@@ -1488,7 +1508,8 @@ var _ = Describe("RsyncTLS as a source", func() {
 					Expect(kerrors.IsNotFound(k8sClient.Get(ctx, nsn, job))).To(BeTrue())
 
 					// Run ensureJob again as the reconciler would do - should recreate the job
-					j, e = mover.ensureJob(ctx, sPVC, sa, tlsKeySecret.GetName()) // Using sPVC as dataPVC (i.e. direct)
+					j, e = mover.ensureJob(ctx, jobName, sPVC, sPVC.GetName(), pvcCount, tgtPortMapping, sa,
+						tlsKeySecret.GetName()) // Using sPVC as dataPVC (i.e. direct)
 					Expect(e).NotTo(HaveOccurred())
 					Expect(j).To(BeNil()) // job hasn't completed
 
@@ -1499,7 +1520,8 @@ var _ = Describe("RsyncTLS as a source", func() {
 
 			When("the job has failed", func() {
 				It("should be restarted", func() {
-					j, e := mover.ensureJob(ctx, sPVC, sa, tlsKeySecret.GetName()) // Using sPVC as dataPVC (i.e. direct)
+					j, e := mover.ensureJob(ctx, jobName, sPVC, sPVC.GetName(), pvcCount, tgtPortMapping, sa,
+						tlsKeySecret.GetName()) // Using sPVC as dataPVC (i.e. direct)
 					Expect(e).NotTo(HaveOccurred())
 					Expect(j).To(BeNil()) // hasn't completed
 					nsn := types.NamespacedName{Name: jobName, Namespace: ns.Name}
@@ -1511,14 +1533,16 @@ var _ = Describe("RsyncTLS as a source", func() {
 					Expect(k8sClient.Status().Update(ctx, job)).To(Succeed())
 
 					// Since job is failed >= backofflimit, ensureJob should remove the job so it can be recreated
-					j, e = mover.ensureJob(ctx, sPVC, sa, tlsKeySecret.GetName()) // Using sPVC as dataPVC (i.e. direct)
+					j, e = mover.ensureJob(ctx, jobName, sPVC, sPVC.GetName(), pvcCount, tgtPortMapping, sa,
+						tlsKeySecret.GetName()) // Using sPVC as dataPVC (i.e. direct)
 					Expect(e).NotTo(HaveOccurred())
 					Expect(j).To(BeNil())
 					// Job should be deleted
 					Expect(kerrors.IsNotFound(k8sClient.Get(ctx, nsn, job))).To(BeTrue())
 
 					// Reconcile again, job should get recreated on next call to ensureJob
-					j, e = mover.ensureJob(ctx, sPVC, sa, tlsKeySecret.GetName()) // Using sPVC as dataPVC (i.e. direct)
+					j, e = mover.ensureJob(ctx, jobName, sPVC, sPVC.GetName(), pvcCount, tgtPortMapping, sa,
+						tlsKeySecret.GetName()) // Using sPVC as dataPVC (i.e. direct)
 					Expect(e).NotTo(HaveOccurred())
 					Expect(j).To(BeNil()) // will return nil since job is not completed
 
@@ -1664,7 +1688,7 @@ var _ = Describe("Rsync as a destination", func() {
 			var svc *corev1.Service
 			JustBeforeEach(func() {
 				// create the svc
-				result, err := mover.ensureServiceAndPublishAddress(ctx)
+				result, _, err := mover.ensureServiceAndPublishAddress(ctx, &pvcGroup{})
 				Expect(err).To(BeNil())
 
 				// Service should now be created - check to see it's been created
@@ -1680,7 +1704,7 @@ var _ = Describe("Rsync as a destination", func() {
 					// This means the svc address wasn't populated immediately
 					// Keep reconciling - when service has address populated it should get updated in the rs status)
 					Eventually(func() bool {
-						gotAddr, err := mover.ensureServiceAndPublishAddress(ctx)
+						gotAddr, _, err := mover.ensureServiceAndPublishAddress(ctx, &pvcGroup{})
 						return err != nil && gotAddr
 					}, maxWait, interval).Should(BeTrue())
 
@@ -1951,7 +1975,7 @@ var _ = Describe("Rsync as a destination", func() {
 			})
 			When("it's the initial sync", func() {
 				It("should have the command defined properly", func() {
-					j, e := mover.ensureJob(ctx, dPVC, sa, testKey)
+					j, e := mover.ensureJob(ctx, jobName, dPVC, dPVC.GetName(), 1, "", sa, testKey)
 					Expect(e).NotTo(HaveOccurred())
 					Expect(j).To(BeNil()) // hasn't completed
 					nsn := types.NamespacedName{Name: jobName, Namespace: ns.Name}
@@ -2042,7 +2066,8 @@ var _ = Describe("Rsync as a destination", func() {
 					Kind:     "VolumeSnapshot",
 					Name:     snap2.Name,
 				}
-				Expect(utils.MarkOldSnapshotForCleanup(ctx, k8sClient, logger, rd, oldSnap, latestSnap)).To(Succeed())
+				Expect(utils.MarkOldSnapshotOrGroupSnapshotForCleanup(
+					ctx, k8sClient, logger, rd, oldSnap, latestSnap)).To(Succeed())
 
 				Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(snap1), snap1)).To(Succeed())
 				_, ok := snap1.GetLabels()["volsync.backube/cleanup"]

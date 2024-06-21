@@ -1708,7 +1708,8 @@ var _ = Describe("Rsync as a destination", func() {
 					Kind:     "VolumeSnapshot",
 					Name:     snap2.Name,
 				}
-				Expect(utils.MarkOldSnapshotForCleanup(ctx, k8sClient, logger, rd, oldSnap, latestSnap)).To(Succeed())
+				Expect(utils.MarkOldSnapshotOrGroupSnapshotForCleanup(ctx, k8sClient, logger,
+					rd, oldSnap, latestSnap)).To(Succeed())
 
 				Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(snap1), snap1)).To(Succeed())
 				_, ok := snap1.GetLabels()["volsync.backube/cleanup"]

@@ -19,7 +19,6 @@ package cmd
 import (
 	"context"
 	"os"
-	"reflect"
 
 	volsyncv1alpha1 "github.com/backube/volsync/api/v1alpha1"
 	. "github.com/onsi/ginkgo/v2"
@@ -87,6 +86,7 @@ var _ = Describe("Replication relationships can create/save/load", func() {
 					AccessModes:             []corev1.PersistentVolumeAccessMode{corev1.ReadWriteMany},
 					VolumeSnapshotClassName: ptr.To("vscn2"),
 					DestinationPVC:          ptr.To("dpvc"),
+					DestinationPVCGroup:     []volsyncv1alpha1.DestinationPVCGroupMember{},
 				},
 				ServiceType: (*corev1.ServiceType)(ptr.To(string(corev1.ServiceTypeClusterIP))),
 			},
@@ -96,7 +96,7 @@ var _ = Describe("Replication relationships can create/save/load", func() {
 		By("loading it back in, they should match")
 		rr2, err := loadReplicationRelationship(cmd)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(reflect.DeepEqual(rr2.data, rr.data)).To(BeTrue())
+		Expect(rr2.data).To(Equal(rr.data))
 	})
 })
 

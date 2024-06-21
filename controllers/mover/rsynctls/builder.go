@@ -148,6 +148,7 @@ func (rb *Builder) FromSource(client client.Client, logger logr.Logger,
 	}, nil
 }
 
+//nolint:funlen
 func (rb *Builder) FromDestination(client client.Client, logger logr.Logger,
 	eventRecorder events.EventRecorder,
 	destination *volsyncv1alpha1.ReplicationDestination, privileged bool) (mover.Mover, error) {

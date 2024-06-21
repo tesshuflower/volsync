@@ -56,8 +56,6 @@ if [[ $DEBUG_MOVER -eq 1 && "$SCRIPT_DIR" != "/tmp" ]]; then
   exit 0
 fi
 
-#IS_VOLUME_GROUP="${IS_VOLUME_GROUP:-0}"
-MAX_PARALLELISM="${MAX_PARALLELISM:-2}"
 PVC_LIST="${PVC_LIST:-}"
 PVC_NAME="${PVC_NAME:-}"
 PVC_COUNT="${PVC_COUNT:-1}"
@@ -195,7 +193,6 @@ while [[ ${rc} -ne 0 && ${RETRY} -lt ${MAX_RETRIES} ]]; do
         #fi
         echo "==============================="
         echo "PVC_LIST: ${PVC_LIST} ..."
-        echo "MAX_PARALLELISM: ${MAX_PARALLELISM}"
         echo "==============================="
         echo ""
         rc=0
@@ -219,31 +216,21 @@ while [[ ${rc} -ne 0 && ${RETRY} -lt ${MAX_RETRIES} ]]; do
                 rc=$?
             fi
         fi
-        rc_a=$?
 
         if [[ ${rc} -eq 0 ]]; then
-            shopt -s dotglob  # Make * include dotfiles
-            if [[ -n $(ls -A -- "${SOURCE}"/*) ]]; then
+            ls -A "${SOURCE_DIR}"/ > /tmp/filelist.txt
+            if [[ -s /tmp/filelist.txt ]]; then
+                #TODO: remove this debug stuff
                 echo "###### First pass #####"
                 echo ""
                 find "${SOURCE}"
                 echo ">> SOURCE_DIR: ${SOURCE_DIR}"
                 echo ">> SOURCE_STUNNEL_LISTEN_PORT: ${SOURCE_STUNNEL_LISTEN_PORT}"
                 echo ""
+                #TODO: end TODO
 
                 # 1st run preserves as much as possible, but excludes the root directory
-                echo CALLING rsync -aAhHSxz --exclude=lost+found --itemize-changes --info=stats2,misc2 "${SOURCE_DIR}"/'*' rsync://127.0.0.1:"${SOURCE_STUNNEL_LISTEN_PORT}""${SOURCE_DIR}"
-                echo
-
-                #FIXME: remove
-                #echo "### SLEEPING for 2 mins ..."
-                #sleep 120
-                #echo "### Will start in 1 min ..."
-                #sleep 60
-                #FIXME: end remove
-
-                #rsync -aAhHSxz -vvv --exclude=lost+found --itemize-changes --info=stats2,misc2 "${SOURCE_DIR}"/* rsync://127.0.0.1:"${SOURCE_STUNNEL_LISTEN_PORT}""${SOURCE_DIR}"
-                rsync -aAhHSxz --exclude=lost+found --itemize-changes --info=stats2,misc2 "${SOURCE_DIR}"/* rsync://127.0.0.1:"${SOURCE_STUNNEL_LISTEN_PORT}""${SOURCE_DIR}"
+                rsync -aAhHSxz -r --exclude=lost+found --itemize-changes --info=stats2,misc2 --files-from=/tmp/filelist.txt "${SOURCE_DIR}/" rsync://127.0.0.1:"${SOURCE_STUNNEL_LISTEN_PORT}""${SOURCE_DIR}"
             else
                 echo "Skipping sync of empty source directory"
             fi

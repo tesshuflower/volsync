@@ -1997,7 +1997,8 @@ var _ = Describe("Rclone as a destination", func() {
 					Kind:     "VolumeSnapshot",
 					Name:     snap2.Name,
 				}
-				Expect(utils.MarkOldSnapshotForCleanup(ctx, k8sClient, logger, rd, oldSnap, latestSnap)).To(Succeed())
+				Expect(utils.MarkOldSnapshotOrGroupSnapshotForCleanup(ctx, k8sClient, logger, rd,
+					oldSnap, latestSnap)).To(Succeed())
 
 				//Reload snap2 and update status
 				Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(snap2), snap2)).To(Succeed())

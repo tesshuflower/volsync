@@ -177,7 +177,8 @@ type MoverConfig struct {
 
 type SourcePVCGroup struct {
 	//TODO: possibly instead of selector use source volumesnapshotsource
-	//TODO:  See:  https://github.com/kubernetes-csi/external-snapshotter/blob/cdbbb78ff88de2d72bdeb2e3bb30f81e12128a55/client/apis/volumegroupsnapshot/v1alpha1/types.go#L31
+	//nolint: lll
+	//TODO: See:  https://github.com/kubernetes-csi/external-snapshotter/blob/cdbbb78ff88de2d72bdeb2e3bb30f81e12128a55/client/apis/volumegroupsnapshot/v1alpha1/types.go#L31
 	Selector metav1.LabelSelector `json:"selector,omitempty"`
 
 	// VolumeGroupSnapshotClassName is the name of the VolumeGroupSnapshotClass

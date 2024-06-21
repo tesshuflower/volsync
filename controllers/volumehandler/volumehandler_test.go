@@ -102,7 +102,7 @@ var _ = Describe("Volumehandler", func() {
 				Expect(vh).ToNot(BeNil())
 
 				pvcName := "thepvc"
-				newPVC, err := vh.EnsureNewPVC(context.TODO(), logger, pvcName)
+				newPVC, err := vh.EnsureNewPVC(context.TODO(), logger, pvcName, nil)
 				Expect(err).ToNot(HaveOccurred())
 				Expect(newPVC).ToNot(BeNil())
 				Expect(*newPVC.Spec.StorageClassName).To(Equal(customSC))

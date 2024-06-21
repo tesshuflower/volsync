@@ -48,6 +48,7 @@ type namedTargetPort struct {
 	targetPortName string
 }
 
+//nolint:funlen
 func (d *rsyncSvcDescription) Reconcile(l logr.Logger) error {
 	logger := l.WithValues("service", client.ObjectKeyFromObject(d.Service))
 
