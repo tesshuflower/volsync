@@ -308,7 +308,7 @@ stages:
       spec:
         mountPath: {}
 - parallel: true
-  tests: null
+  tests: []
 storage:
   spec:
     mountPath: {}

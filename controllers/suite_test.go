@@ -42,8 +42,6 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	volsyncv1alpha1 "github.com/backube/volsync/api/v1alpha1"
-	"github.com/backube/volsync/controllers/mover/rclone"
-	"github.com/backube/volsync/controllers/mover/restic"
 	"github.com/backube/volsync/controllers/mover/rsync"
 	"github.com/backube/volsync/controllers/utils"
 	//+kubebuilder:scaffold:imports
@@ -113,8 +111,10 @@ var _ = BeforeSuite(func() {
 
 	// Register the data movers
 	Expect(rsync.Register()).To(Succeed())
-	Expect(rclone.Register()).To(Succeed())
-	Expect(restic.Register()).To(Succeed())
+	/*
+		Expect(rclone.Register()).To(Succeed())
+		Expect(restic.Register()).To(Succeed())
+	*/
 
 	k8sManager, err := ctrl.NewManager(cfg, ctrl.Options{
 		Scheme:  scheme.Scheme,
