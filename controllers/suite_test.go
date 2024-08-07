@@ -24,6 +24,7 @@ import (
 	"testing"
 	"time"
 
+	vgsnapv1alpha1 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumegroupsnapshot/v1alpha1"
 	snapv1 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
 	volumepopulatorv1beta1 "github.com/kubernetes-csi/volume-data-source-validator/client/apis/volumepopulator/v1beta1"
 	. "github.com/onsi/ginkgo/v2"
@@ -59,12 +60,14 @@ const (
 // These tests use Ginkgo (BDD-style Go testing framework). Refer to
 // http://onsi.github.io/ginkgo/ to learn more about Ginkgo.
 
-var cfg *rest.Config
-var k8sClient client.Client
-var k8sDirectClient client.Client
-var testEnv *envtest.Environment
-var cancel context.CancelFunc
-var ctx context.Context
+var (
+	cfg             *rest.Config
+	k8sClient       client.Client
+	k8sDirectClient client.Client
+	testEnv         *envtest.Environment
+	cancel          context.CancelFunc
+	ctx             context.Context
+)
 
 func TestAPIs(t *testing.T) {
 	RegisterFailHandler(Fail)
@@ -97,6 +100,9 @@ var _ = BeforeSuite(func() {
 	Expect(err).NotTo(HaveOccurred())
 
 	err = snapv1.AddToScheme(scheme.Scheme)
+	Expect(err).NotTo(HaveOccurred())
+
+	err = vgsnapv1alpha1.AddToScheme(scheme.Scheme)
 	Expect(err).NotTo(HaveOccurred())
 
 	err = volumepopulatorv1beta1.AddToScheme(scheme.Scheme)
@@ -254,9 +260,11 @@ func (m *ownerRefMatcher) Match(actual interface{}) (success bool, err error) {
 	}
 	return true, nil
 }
+
 func (m *ownerRefMatcher) FailureMessage(actual interface{}) (message string) {
 	return fmt.Sprintf("Expected\n\t%#v\nto be owned by\n\t%#v\nbut %v", actual, m.owner, m.reason)
 }
+
 func (m *ownerRefMatcher) NegatedFailureMessage(actual interface{}) (message string) {
 	return fmt.Sprintf("Expected\n\t%#v\nnot to be owned by\n\t%#v", actual, m.owner)
 }

@@ -60,15 +60,22 @@ func CleanupObjects(ctx context.Context, c client.Client,
 	}
 	l.Info("deleting temporary objects")
 	for _, obj := range types {
-		_, ok := obj.(*snapv1.VolumeSnapshot)
-		if ok {
+		_, isSnap := obj.(*snapv1.VolumeSnapshot)
+		_, isVGSnap := obj.(*vgsnapv1alpha1.VolumeGroupSnapshot)
+		if isSnap {
 			// Handle volumesnapshots differently - do not delete if they have a specific label
 			err := cleanupSnapshots(ctx, c, logger, owner)
 			if err != nil {
 				l.Error(err, "unable to delete volume snapshot(s)")
 				return err
 			}
-			// TODO: cleanup volumegroupsnapshots too, similarly to volumesnapshots
+		} else if isVGSnap {
+			// Handle volumegroupsnapshots - do not delete if they have a specific label
+			err := cleanupVGSnapshots(ctx, c, logger, owner)
+			if err != nil {
+				l.Error(err, "unable to delete volumegroup snapshot(s)")
+				return err
+			}
 		} else {
 			err := c.DeleteAllOf(ctx, obj, options...)
 			if client.IgnoreNotFound(err) != nil {
@@ -95,21 +102,52 @@ func cleanupSnapshots(ctx context.Context, c client.Client,
 		return err
 	}
 
-	return CleanupSnapshotsWithLabelCheck(ctx, c, logger, owner, snapList)
+	// Make into generic slice of client.Object
+	snapObjList := []client.Object{}
+	for i := range snapList.Items {
+		snap := snapList.Items[i]
+		snapObjList = append(snapObjList, &snap)
+	}
+
+	return CleanupSnapshotsOrVGSnapshotsWithLabelCheck(ctx, c, logger, owner, snapObjList)
 }
 
-func CleanupSnapshotsWithLabelCheck(ctx context.Context, c client.Client,
-	logger logr.Logger, owner client.Object, snapList *snapv1.VolumeSnapshotList,
+func cleanupVGSnapshots(ctx context.Context, c client.Client,
+	logger logr.Logger, owner client.Object,
 ) error {
-	// If marked as do-not-delete, remove the cleanup label and ownership
-	snapsForCleanup, err := relinquishSnapshotsWithDoNotDeleteLabel(ctx, c, logger, owner, snapList)
+	// Load current list of volumegroupsnapshots with the cleanup label
+	listOptions := []client.ListOption{
+		client.MatchingLabels{cleanupLabelKey: string(owner.GetUID())},
+		client.InNamespace(owner.GetNamespace()),
+	}
+	vgsnapList := &vgsnapv1alpha1.VolumeGroupSnapshotList{}
+	err := c.List(ctx, vgsnapList, listOptions...)
 	if err != nil {
 		return err
 	}
 
-	// Remaining snapshots should be cleaned up
+	// Make into generic slice of client.Object
+	vgsnapObjList := []client.Object{}
+	for i := range vgsnapList.Items {
+		vgsnap := vgsnapList.Items[i]
+		vgsnapObjList = append(vgsnapObjList, &vgsnap)
+	}
+
+	return CleanupSnapshotsOrVGSnapshotsWithLabelCheck(ctx, c, logger, owner, vgsnapObjList)
+}
+
+func CleanupSnapshotsOrVGSnapshotsWithLabelCheck(ctx context.Context, c client.Client,
+	logger logr.Logger, owner client.Object, snapAndVGSnapList []client.Object,
+) error {
+	// If marked as do-not-delete, remove the cleanup label and ownership
+	snapsForCleanup, err := relinquishSnapshotsOrVGSnapshotsWithDoNotDeleteLabel(ctx, c, logger, owner, snapAndVGSnapList)
+	if err != nil {
+		return err
+	}
+
+	// Remaining snapshots/vgsnapshots should be cleaned up
 	for i := range snapsForCleanup {
-		snapForCleanup := &snapsForCleanup[i]
+		snapForCleanup := snapsForCleanup[i]
 
 		if snapInUseByOther(snapForCleanup, owner) {
 			// If the snapshot has any other owner reference or used by vol populator pvc
@@ -118,7 +156,7 @@ func CleanupSnapshotsWithLabelCheck(ctx context.Context, c client.Client,
 			if updated {
 				err := c.Update(ctx, snapForCleanup)
 				if err != nil {
-					logger.Error(err, "error removing ownerRef from snapshot",
+					logger.Error(err, "error removing ownerRef from snapshot or vgsnapshot",
 						"name", snapForCleanup.GetName(), "namespace", snapForCleanup.GetNamespace())
 					return err
 				}
@@ -127,7 +165,8 @@ func CleanupSnapshotsWithLabelCheck(ctx context.Context, c client.Client,
 			// Use a delete precondition to avoid timing issues.
 			// If the object was modified (for example by someone adding a new label) in-between us loading it and
 			// performing the delete, the should throw an error as the resourceVersion will not match
-			err := c.Delete(ctx, snapForCleanup, client.Preconditions{ResourceVersion: &snapForCleanup.ResourceVersion})
+			snapResourceVersion := snapForCleanup.GetResourceVersion()
+			err := c.Delete(ctx, snapForCleanup, client.Preconditions{ResourceVersion: &snapResourceVersion})
 			if err != nil {
 				return err
 			}
@@ -137,8 +176,8 @@ func CleanupSnapshotsWithLabelCheck(ctx context.Context, c client.Client,
 	return nil
 }
 
-// TODO: handle volumegroupsnapshots
-func RelinquishOwnedSnapshotsWithDoNotDeleteLabel(ctx context.Context, c client.Client,
+// Relinquish ownership of any volumesnapshots or volumegroupsnapshots that have the do-not-delete label
+func RelinquishOwnedSnapshotsAndVGSnapshotsWithDoNotDeleteLabel(ctx context.Context, c client.Client,
 	logger logr.Logger, owner client.Object,
 ) error {
 	// Find all snapshots in the namespace with the do not delete label
@@ -153,31 +192,49 @@ func RelinquishOwnedSnapshotsWithDoNotDeleteLabel(ctx context.Context, c client.
 		},
 		client.InNamespace(owner.GetNamespace()),
 	}
+
+	// Find list of snapshots by label selector
 	snapList := &snapv1.VolumeSnapshotList{}
 	err = c.List(ctx, snapList, listOptions...)
 	if err != nil {
 		return err
 	}
 
-	_, err = relinquishSnapshotsWithDoNotDeleteLabel(ctx, c, logger, owner, snapList)
+	// Find list of vgsnapshots by label selector
+	vgsnapList := &vgsnapv1alpha1.VolumeGroupSnapshotList{}
+	err = c.List(ctx, vgsnapList, listOptions...)
+	if err != nil {
+		return err
+	}
+
+	// Add snaps and vgsnaps to a list
+	snapAndVGSnapObjList := []client.Object{}
+	for i := range snapList.Items {
+		snap := snapList.Items[i]
+		snapAndVGSnapObjList = append(snapAndVGSnapObjList, &snap)
+	}
+	for i := range vgsnapList.Items {
+		vgsnap := vgsnapList.Items[i]
+		snapAndVGSnapObjList = append(snapAndVGSnapObjList, &vgsnap)
+	}
+
+	_, err = relinquishSnapshotsOrVGSnapshotsWithDoNotDeleteLabel(ctx, c, logger, owner, snapAndVGSnapObjList)
 	return err
 }
 
-// Returns a list of remaining VolumeSnapshots that were not relinquished
-// TODO: handle volumegroupsnapshots
-func relinquishSnapshotsWithDoNotDeleteLabel(ctx context.Context, c client.Client,
-	logger logr.Logger, owner client.Object,
-	snapList *snapv1.VolumeSnapshotList,
-) ([]snapv1.VolumeSnapshot, error) {
-	remainingSnapshots := []snapv1.VolumeSnapshot{}
+// Returns a list of remaining VolumeSnapshots/VolumeGroupSnapshots that were not relinquished
+func relinquishSnapshotsOrVGSnapshotsWithDoNotDeleteLabel(ctx context.Context, c client.Client,
+	logger logr.Logger, owner client.Object, snapList []client.Object,
+) ([]client.Object, error) {
+	remainingSnapshots := []client.Object{}
 
 	var snapRelinquishErr error
 
-	for i := range snapList.Items {
-		snapshot := snapList.Items[i]
+	for i := range snapList {
+		snapshot := snapList[i]
 
-		ownershipRemoved, err := RemoveSnapOwnershipAndLabelsIfRequestedAndUpdate(ctx, c, logger,
-			owner, &snapshot)
+		ownershipRemoved, err := RemoveSnapOrVGSnapOwnershipAndLabelsIfRequestedAndUpdate(ctx, c, logger,
+			owner, snapshot)
 		if err != nil {
 			snapRelinquishErr = err // Will return the latest error at the end but keep processing the snaps
 			continue
@@ -190,14 +247,16 @@ func relinquishSnapshotsWithDoNotDeleteLabel(ctx context.Context, c client.Clien
 	return remainingSnapshots, snapRelinquishErr
 }
 
-func RemoveSnapOwnershipAndLabelsIfRequestedAndUpdate(ctx context.Context, c client.Client, logger logr.Logger,
-	owner client.Object, snapshot *snapv1.VolumeSnapshot,
+// For snapshots or volumegroupsnapshots
+func RemoveSnapOrVGSnapOwnershipAndLabelsIfRequestedAndUpdate(ctx context.Context, c client.Client, logger logr.Logger,
+	owner client.Object, snapshot client.Object,
 ) (bool, error) {
 	ownershipRemoved := false
 
 	if IsMarkedDoNotDelete(snapshot) {
-		logger.Info("Not deleting volumesnapshot protected with label - will remove ownership and cleanup label",
-			"name", snapshot.GetName(), "label", DoNotDeleteLabelKey)
+		logger.Info(
+			"Not deleting volumesnapshot/volumegroupsnapshot protected with label - will remove ownership and cleanup label",
+			"name", snapshot.GetName(), "kind", snapshot.GetObjectKind(), "label", DoNotDeleteLabelKey)
 		ownershipRemoved = true
 
 		updated := UnMarkForCleanupAndRemoveOwnership(snapshot, owner)
@@ -253,11 +312,13 @@ func RemoveOwnerReference(obj metav1.Object, owner client.Object) bool {
 	return updated
 }
 
-func snapInUseByOther(snapshot *snapv1.VolumeSnapshot, owner client.Object) bool {
+// Checks if snapshot or volumegroupsnapshot is owned by someone else or is being used by the volume populator
+func snapInUseByOther(snapshot client.Object, owner client.Object) bool {
 	return hasOtherOwnerRef(snapshot, owner) || snapInUseByVolumePopulatorPVC(snapshot)
 }
 
-func snapInUseByVolumePopulatorPVC(snapshot *snapv1.VolumeSnapshot) bool {
+// Can be called for  snapshot or volumegroupsnapshot - but volumepopulatorlabelprefix only will apply to snapshots
+func snapInUseByVolumePopulatorPVC(snapshot client.Object) bool {
 	// Volume Populator will put on a label with a specific prefix on a snapshot while
 	// it's populating the PVC from that snapshot - this indicates at least one pvc for
 	// the volume populator is actively using this snapshot

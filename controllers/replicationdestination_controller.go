@@ -101,7 +101,7 @@ func (r *ReplicationDestinationReconciler) Reconcile(ctx context.Context, req ct
 	var err error
 
 	// Check if any volume snapshots are marked with do-not-delete label and remove ownership if so
-	err = utils.RelinquishOwnedSnapshotsWithDoNotDeleteLabel(ctx, r.Client, logger, inst)
+	err = utils.RelinquishOwnedSnapshotsAndVGSnapshotsWithDoNotDeleteLabel(ctx, r.Client, logger, inst)
 	if err != nil {
 		return result, err
 	}

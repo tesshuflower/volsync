@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	vgsnapv1alpha1 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumegroupsnapshot/v1alpha1"
 	snapv1 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -48,7 +49,7 @@ import (
 
 const (
 	mountPath        = "/data"
-	baseMountPath    = mountPath //FIXME: remove
+	baseMountPath    = mountPath // FIXME: remove
 	devicePath       = "/dev/block"
 	dataVolumeName   = "data"
 	tlsContainerPort = 8000
@@ -73,8 +74,8 @@ type Mover struct {
 	isSource                     bool
 	paused                       bool
 	mainPVCName                  *string
-	mainPVCGroupSelector         *volsyncv1alpha1.SourcePVCGroup             //FIXME:
-	mainPVCGroup                 []volsyncv1alpha1.DestinationPVCGroupMember //FIXME:
+	mainPVCGroupSelector         *volsyncv1alpha1.SourcePVCGroup             // FIXME:
+	mainPVCGroup                 []volsyncv1alpha1.DestinationPVCGroupMember // FIXME:
 	privileged                   bool
 	sourceStatus                 *volsyncv1alpha1.ReplicationSourceRsyncTLSStatus
 	destStatus                   *volsyncv1alpha1.ReplicationDestinationRsyncTLSStatus
@@ -89,8 +90,8 @@ var _ mover.Mover = &Mover{}
 // individual objects to be cleaned up must also be marked.
 var cleanupTypes = []client.Object{
 	&corev1.PersistentVolumeClaim{},
-	//TODO: volumegroupsnapshot
 	&snapv1.VolumeSnapshot{},
+	&vgsnapv1alpha1.VolumeGroupSnapshot{},
 	&batchv1.Job{},
 }
 
@@ -101,10 +102,10 @@ func (m *Mover) Synchronize(ctx context.Context) (mover.Result, error) {
 	var err error
 
 	// Allocate temporary data PVC
-	//var dataPVC *corev1.PersistentVolumeClaim
+	// var dataPVC *corev1.PersistentVolumeClaim
 	var dataPVCGroup *pvcGroup
 	if m.isSource {
-		//dataPVC, err = m.ensureSourcePVCs(ctx)
+		// dataPVC, err = m.ensureSourcePVCs(ctx)
 		dataPVCGroup, err = m.ensureSourcePVCs(ctx)
 	} else {
 		dataPVCGroup, err = m.ensureDestinationPVCs(ctx)
@@ -337,7 +338,7 @@ func (m *Mover) Cleanup(ctx context.Context) (mover.Result, error) {
 	m.logger.V(1).Info("Starting cleanup", "m.mainPVCName", m.mainPVCName, "m.isSource", m.isSource)
 	if !m.isSource {
 		if len(m.mainPVCGroup) > 0 {
-			//TODO: refactor this cleanup for volume groups
+			// TODO: refactor this cleanup for volume groups
 			// Volume group scenario
 			m.logger.V(1).Info("removing snapshot annotations from pvcs in group")
 			// Cleanup the snapshot annotation on pvc for replicationDestination scenario so that
@@ -456,7 +457,7 @@ func (m *Mover) ensureDestinationPVCs(ctx context.Context) (*pvcGroup, error) {
 	dstPVCGroup := pvcGroup{}
 
 	if len(m.mainPVCGroup) > 0 {
-		//TODO: need to handle the isProvidedPVC case? if so, will need to make sure
+		// TODO: need to handle the isProvidedPVC case? if so, will need to make sure
 		// a unique labelSelector is found so we can create a volume group snapshot later
 
 		// Volume Group case
@@ -479,8 +480,8 @@ func (m *Mover) ensureDestinationPVCs(ctx context.Context) (*pvcGroup, error) {
 		for _, memberPVC := range m.mainPVCGroup {
 			// Need to allocate the incoming data volumes
 			newPVC, err := m.vh.EnsureNewPVC(ctx, m.logger, memberPVC.GetDestinationPVCName(), pvcLabels)
-			//FIXME: the above won't work if any pvcs have differing sizes or if they already exist.
-			//FIXME: this is just temporary to test out for the moment
+			// FIXME: the above won't work if any pvcs have differing sizes or if they already exist.
+			// FIXME: this is just temporary to test out for the moment
 			if err != nil || newPVC == nil {
 				return nil, err
 			}
@@ -519,7 +520,8 @@ func (m *Mover) getDestinationPVCName() (bool, string) {
 //nolint:funlen
 func (m *Mover) ensureJob(ctx context.Context, jobName string, dataPVC *corev1.PersistentVolumeClaim,
 	origPVCName string, pvcCount int, namedTargetPortsMapping string,
-	sa *corev1.ServiceAccount, rsyncSecretName string) (*batchv1.Job, error) {
+	sa *corev1.ServiceAccount, rsyncSecretName string,
+) (*batchv1.Job, error) {
 	job := &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      jobName,
@@ -595,15 +597,15 @@ func (m *Mover) ensureJob(ctx context.Context, jobName string, dataPVC *corev1.P
 			// Set env var for dest to contain pvc to ports mapping
 			containerEnv = append(containerEnv, corev1.EnvVar{Name: "PVC_PORTS", Value: namedTargetPortsMapping})
 		}
-		podSpec.Containers[0].Command = containerCmd //FIXME: move this into the above if/else?
+		podSpec.Containers[0].Command = containerCmd // FIXME: move this into the above if/else?
 
 		volumeMounts := []corev1.VolumeMount{}
-		//pvcList := ""
+		// pvcList := ""
 		if !blockVolume {
 			mountPath := baseMountPath // Default (for one pvc with no volume group) mount at /data
 			if pvcCount > 1 {          // Part of a volume group - mount at /data/<pvcName>
 				mountPath = mountPath + "/" + origPVCName
-				//TODO: do this for block too (outside if statement)
+				// TODO: do this for block too (outside if statement)
 				containerEnv = append(containerEnv, corev1.EnvVar{Name: "PVC_NAME", Value: origPVCName})
 				containerEnv = append(containerEnv, corev1.EnvVar{Name: "PVC_COUNT", Value: strconv.Itoa(pvcCount)})
 			}
@@ -623,22 +625,28 @@ func (m *Mover) ensureJob(ctx context.Context, jobName string, dataPVC *corev1.P
 		podSpec.RestartPolicy = corev1.RestartPolicyNever
 		podSpec.ServiceAccountName = sa.Name
 		podSpec.Volumes = []corev1.Volume{
-			{Name: dataVolumeName, VolumeSource: corev1.VolumeSource{
-				PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
-					ClaimName: dataPVC.Name,
-					ReadOnly:  readOnlyVolume,
-				}},
+			{
+				Name: dataVolumeName, VolumeSource: corev1.VolumeSource{
+					PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+						ClaimName: dataPVC.Name,
+						ReadOnly:  readOnlyVolume,
+					},
+				},
 			},
-			{Name: "keys", VolumeSource: corev1.VolumeSource{
-				Secret: &corev1.SecretVolumeSource{
-					SecretName:  rsyncSecretName,
-					DefaultMode: ptr.To[int32](0600),
-				}},
+			{
+				Name: "keys", VolumeSource: corev1.VolumeSource{
+					Secret: &corev1.SecretVolumeSource{
+						SecretName:  rsyncSecretName,
+						DefaultMode: ptr.To[int32](0600),
+					},
+				},
 			},
-			{Name: "tempdir", VolumeSource: corev1.VolumeSource{
-				EmptyDir: &corev1.EmptyDirVolumeSource{
-					Medium: corev1.StorageMediumMemory,
-				}},
+			{
+				Name: "tempdir", VolumeSource: corev1.VolumeSource{
+					EmptyDir: &corev1.EmptyDirVolumeSource{
+						Medium: corev1.StorageMediumMemory,
+					},
+				},
 			},
 		}
 

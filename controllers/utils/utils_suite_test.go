@@ -25,6 +25,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	vgsnapv1alpha1 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumegroupsnapshot/v1alpha1"
 	snapv1 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/kubectl/pkg/scheme"
@@ -43,11 +44,13 @@ func TestUtils(t *testing.T) {
 	RunSpecs(t, "Utils Suite")
 }
 
-var k8sClient client.Client
-var k8sClientSet *kubernetes.Clientset
-var testEnv *envtest.Environment
-var cancel context.CancelFunc
-var ctx context.Context
+var (
+	k8sClient    client.Client
+	k8sClientSet *kubernetes.Clientset
+	testEnv      *envtest.Environment
+	cancel       context.CancelFunc
+	ctx          context.Context
+)
 
 var _ = BeforeSuite(func() {
 	logf.SetLogger(zap.New(zap.WriteTo(GinkgoWriter), zap.UseDevMode(true)))
@@ -60,7 +63,7 @@ var _ = BeforeSuite(func() {
 			// VolSync CRDs
 			filepath.Join("..", "..", "config", "crd", "bases"),
 
-			// Snapshot CRDs
+			// Snapshot/VolumeGroupSnapshot CRDs
 			filepath.Join("..", "..", "hack", "crds"),
 		},
 		ErrorIfCRDPathMissing: true,
@@ -74,6 +77,9 @@ var _ = BeforeSuite(func() {
 	Expect(err).NotTo(HaveOccurred())
 
 	err = snapv1.AddToScheme(scheme.Scheme)
+	Expect(err).NotTo(HaveOccurred())
+
+	err = vgsnapv1alpha1.AddToScheme(scheme.Scheme)
 	Expect(err).NotTo(HaveOccurred())
 
 	k8sClient, err = client.New(cfg, client.Options{Scheme: scheme.Scheme})

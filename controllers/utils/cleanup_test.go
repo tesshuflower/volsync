@@ -18,9 +18,12 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 package utils_test
 
 import (
+	"fmt"
+
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	vgsnapv1alpha1 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumegroupsnapshot/v1alpha1"
 	snapv1 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
 	corev1 "k8s.io/api/core/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
@@ -46,6 +49,10 @@ var _ = Describe("Cleanup", func() {
 	var snapA1 *snapv1.VolumeSnapshot
 	var snapA2 *snapv1.VolumeSnapshot
 	var snapB1 *snapv1.VolumeSnapshot
+
+	var vgsnapA1 *vgsnapv1alpha1.VolumeGroupSnapshot
+	var vgsnapA2 *vgsnapv1alpha1.VolumeGroupSnapshot
+	var vgsnapB1 *vgsnapv1alpha1.VolumeGroupSnapshot
 
 	var pvcA1 *corev1.PersistentVolumeClaim
 	var pvcA2 *corev1.PersistentVolumeClaim
@@ -118,9 +125,6 @@ var _ = Describe("Cleanup", func() {
 		Expect(ctrl.SetControllerReference(rdA, snapA2, k8sClient.Scheme())).To(Succeed())
 		Expect(k8sClient.Create(ctx, snapA2)).To(Succeed())
 
-		//
-		// Create some volume snapshots owned by the ReplicationDestinations
-		//
 		snapB1 = &snapv1.VolumeSnapshot{
 			ObjectMeta: metav1.ObjectMeta{
 				GenerateName: "snap-b-1-",
@@ -135,6 +139,66 @@ var _ = Describe("Cleanup", func() {
 		// Make this owned by rdB
 		Expect(ctrl.SetControllerReference(rdB, snapB1, k8sClient.Scheme())).To(Succeed())
 		Expect(k8sClient.Create(ctx, snapB1)).To(Succeed())
+
+		//
+		// Create some volumegroup snapshots owned by the ReplicationDestinations
+		//
+		vgsnapA1 = &vgsnapv1alpha1.VolumeGroupSnapshot{
+			ObjectMeta: metav1.ObjectMeta{
+				GenerateName: "vgsnap-a-1-",
+				Namespace:    testNamespace.GetName(),
+			},
+			Spec: vgsnapv1alpha1.VolumeGroupSnapshotSpec{
+				Source: vgsnapv1alpha1.VolumeGroupSnapshotSource{
+					Selector: &metav1.LabelSelector{
+						MatchLabels: map[string]string{
+							"mypvclabel": "doesnotexist",
+						},
+					},
+				},
+			},
+		}
+		// Make this owned by rdA
+		Expect(ctrl.SetControllerReference(rdA, vgsnapA1, k8sClient.Scheme())).To(Succeed())
+		Expect(k8sClient.Create(ctx, vgsnapA1)).To(Succeed())
+
+		vgsnapA2 = &vgsnapv1alpha1.VolumeGroupSnapshot{
+			ObjectMeta: metav1.ObjectMeta{
+				GenerateName: "vgsnap-a-2-",
+				Namespace:    testNamespace.GetName(),
+			},
+			Spec: vgsnapv1alpha1.VolumeGroupSnapshotSpec{
+				Source: vgsnapv1alpha1.VolumeGroupSnapshotSource{
+					Selector: &metav1.LabelSelector{
+						MatchLabels: map[string]string{
+							"mypvclabel-a2": "alsodoesnotexist",
+						},
+					},
+				},
+			},
+		}
+		// Make this owned by rdA
+		Expect(ctrl.SetControllerReference(rdA, vgsnapA2, k8sClient.Scheme())).To(Succeed())
+		Expect(k8sClient.Create(ctx, vgsnapA2)).To(Succeed())
+
+		vgsnapB1 = &vgsnapv1alpha1.VolumeGroupSnapshot{
+			ObjectMeta: metav1.ObjectMeta{
+				GenerateName: "vgsnap-b-1-",
+				Namespace:    testNamespace.GetName(),
+			},
+			Spec: vgsnapv1alpha1.VolumeGroupSnapshotSpec{
+				Source: vgsnapv1alpha1.VolumeGroupSnapshotSource{
+					Selector: &metav1.LabelSelector{
+						MatchLabels: map[string]string{
+							"mypvclabel-b1": "alsodoesnotexist",
+						},
+					},
+				},
+			},
+		}
+		// Make this owned by rdB
+		Expect(ctrl.SetControllerReference(rdB, vgsnapB1, k8sClient.Scheme())).To(Succeed())
+		Expect(k8sClient.Create(ctx, vgsnapB1)).To(Succeed())
 
 		// Create some PVCs as well
 		capacity := resource.MustParse("1Gi")
@@ -175,18 +239,23 @@ var _ = Describe("Cleanup", func() {
 		Expect(k8sClient.Create(ctx, pvcA2)).To(Succeed())
 	})
 
-	Describe("RelinquishSnapshots", func() {
+	Describe("Relinquish Owned Snapshots and VolumeGroup Snapshots", func() {
 		var allSnapsBefore *snapv1.VolumeSnapshotList
+		var allVGSnapsBefore *vgsnapv1alpha1.VolumeGroupSnapshotList
 
 		JustBeforeEach(func() {
 			// Load all the snapshots in the namespace
 			allSnapsBefore = &snapv1.VolumeSnapshotList{}
 			Expect(k8sClient.List(ctx, allSnapsBefore, client.InNamespace(testNamespace.GetName()))).To(Succeed())
 
-			Expect(utils.RelinquishOwnedSnapshotsWithDoNotDeleteLabel(ctx, k8sClient, logger, rdA)).To(Succeed())
+			// Load all the volumegroup snapshots in the namespace
+			allVGSnapsBefore = &vgsnapv1alpha1.VolumeGroupSnapshotList{}
+			Expect(k8sClient.List(ctx, allVGSnapsBefore, client.InNamespace(testNamespace.GetName()))).To(Succeed())
+
+			Expect(utils.RelinquishOwnedSnapshotsAndVGSnapshotsWithDoNotDeleteLabel(ctx, k8sClient, logger, rdA)).To(Succeed())
 		})
 
-		Context("When no snapshots have the do-not-delete label", func() {
+		Context("When no snapshots or volumegroupsnapshots have the do-not-delete label", func() {
 			It("Should not modify any snapshots", func() {
 				allSnapsAfter := &snapv1.VolumeSnapshotList{}
 				Expect(k8sClient.List(ctx, allSnapsAfter, client.InNamespace(testNamespace.GetName()))).To(Succeed())
@@ -196,6 +265,20 @@ var _ = Describe("Cleanup", func() {
 						if snapAfter.GetName() == snapBefore.GetName() {
 							// Should not have been modified
 							Expect(snapAfter.GetResourceVersion()).To(Equal(snapBefore.GetResourceVersion()))
+						}
+					}
+				}
+			})
+
+			It("Should not modify any volumegroupsnapshots", func() {
+				allVGSnapsAfter := &vgsnapv1alpha1.VolumeGroupSnapshotList{}
+				Expect(k8sClient.List(ctx, allVGSnapsAfter, client.InNamespace(testNamespace.GetName()))).To(Succeed())
+
+				for _, vgsnapAfter := range allVGSnapsAfter.Items {
+					for _, vgsnapBefore := range allVGSnapsBefore.Items {
+						if vgsnapAfter.GetName() == vgsnapBefore.GetName() {
+							// Should not have been modified
+							Expect(vgsnapAfter.GetResourceVersion()).To(Equal(vgsnapBefore.GetResourceVersion()))
 						}
 					}
 				}
@@ -213,6 +296,10 @@ var _ = Describe("Cleanup", func() {
 					utils.DoNotDeleteLabelKey: "donotdeleteme", // any value should be ok
 				}
 				Expect(k8sClient.Update(ctx, snapA2)).To(Succeed())
+
+				// Also put volsync cleanup label on A2
+				utils.MarkForCleanup(rdA, snapA2)
+				Expect(k8sClient.Update(ctx, snapA2)).To(Succeed())
 			})
 
 			It("Should modify snapshots with the do-not-delete label and remove ownership", func() {
@@ -220,10 +307,101 @@ var _ = Describe("Cleanup", func() {
 				Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(snapA1), snapA1)).To(Succeed())
 				Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(snapA2), snapA2)).To(Succeed())
 
+				// A1 and A2 should have owner ref removed and volsync cleanup label if present
+				Expect(validateCleanupLabelAndOwnerRefRemoved(snapA1)).To(Succeed())
+				Expect(validateCleanupLabelAndOwnerRefRemoved(snapA2)).To(Succeed())
+
 				for i := range allSnapsBefore.Items {
 					snapBefore := allSnapsBefore.Items[i]
-					if snapBefore.GetName() == snapA1.GetName() && snapBefore.GetName() == snapA2.GetName() {
-						validateCleanupLabelAndOwnerRef(&snapBefore, rdA)
+					// Everything except A1 and A2 should not have been touched
+					if snapBefore.GetName() != snapA1.GetName() && snapBefore.GetName() != snapA2.GetName() {
+						// re-load the obj and check - it should not have been modified
+						snapAfter := snapv1.VolumeSnapshot{}
+						Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(&snapBefore), &snapAfter)).To(Succeed())
+						Expect(snapAfter.GetResourceVersion()).To(Equal(snapBefore.GetResourceVersion()))
+					}
+				}
+			})
+
+			It("Should not modify any volumegroupsnapshots", func() {
+				allVGSnapsAfter := &vgsnapv1alpha1.VolumeGroupSnapshotList{}
+				Expect(k8sClient.List(ctx, allVGSnapsAfter, client.InNamespace(testNamespace.GetName()))).To(Succeed())
+
+				for _, vgsnapAfter := range allVGSnapsAfter.Items {
+					for _, vgsnapBefore := range allVGSnapsBefore.Items {
+						if vgsnapAfter.GetName() == vgsnapBefore.GetName() {
+							// Should not have been modified
+							Expect(vgsnapAfter.GetResourceVersion()).To(Equal(vgsnapBefore.GetResourceVersion()))
+						}
+					}
+				}
+			})
+		})
+
+		Context("When some snapshots and volumegroupsnapshots have the do-not-delete label with different values", func() {
+			BeforeEach(func() {
+				//
+				// snapA2 will have do-not-delete
+				//
+				snapA2.Labels = map[string]string{
+					utils.DoNotDeleteLabelKey: "false", // any value should be ok
+				}
+				Expect(k8sClient.Update(ctx, snapA2)).To(Succeed())
+
+				//
+				// vgsnapA1 and vgsnapA2 will have do-not-delete
+				//
+				vgsnapA1.Labels = map[string]string{
+					utils.DoNotDeleteLabelKey: "false", // any value should be ok
+				}
+				Expect(k8sClient.Update(ctx, vgsnapA1)).To(Succeed())
+
+				vgsnapA2.Labels = map[string]string{
+					utils.DoNotDeleteLabelKey: "donotdeleteme", // any value should be ok
+				}
+				Expect(k8sClient.Update(ctx, vgsnapA2)).To(Succeed())
+
+				// Also put volsync cleanup label on A2
+				utils.MarkForCleanup(rdA, vgsnapA2)
+				Expect(k8sClient.Update(ctx, vgsnapA2)).To(Succeed())
+			})
+
+			It("Should modify snapshots with the do-not-delete label and remove ownership", func() {
+				// Re-load A2 snapshot
+				Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(snapA2), snapA2)).To(Succeed())
+
+				// A2 should have owner ref removed and volsync cleanup label if present
+				Expect(validateCleanupLabelAndOwnerRefRemoved(snapA2)).To(Succeed())
+
+				// The rest of the snapshots should not have been modified
+				for i := range allSnapsBefore.Items {
+					snapBefore := allSnapsBefore.Items[i]
+					if snapBefore.GetName() != snapA2.GetName() {
+						// re-load the obj and check - it should not have been modified
+						snapAfter := snapv1.VolumeSnapshot{}
+						Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(&snapBefore), &snapAfter)).To(Succeed())
+						Expect(snapAfter.GetResourceVersion()).To(Equal(snapBefore.GetResourceVersion()))
+					}
+				}
+			})
+
+			It("Should modify volumegroupsnapshots with the do-not-delete label and remove ownership", func() {
+				// Re-load A1 and A2 volumegroup snapshots
+				Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(vgsnapA1), vgsnapA1)).To(Succeed())
+				Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(vgsnapA2), vgsnapA2)).To(Succeed())
+
+				// vgsnap A1 and A2 should have owner ref removed and volsync cleanup label if present
+				Expect(validateCleanupLabelAndOwnerRefRemoved(vgsnapA1)).To(Succeed())
+				Expect(validateCleanupLabelAndOwnerRefRemoved(vgsnapA2)).To(Succeed())
+
+				// The rest of the vgsnapshots should not have been modified
+				for i := range allVGSnapsBefore.Items {
+					vgsnapBefore := allVGSnapsBefore.Items[i]
+					if vgsnapBefore.GetName() != vgsnapA1.GetName() && vgsnapBefore.GetName() != vgsnapA2.GetName() {
+						// re-load the obj and check - it should not have been modified
+						vgsnapAfter := vgsnapv1alpha1.VolumeGroupSnapshot{}
+						Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(&vgsnapBefore), &vgsnapAfter)).To(Succeed())
+						Expect(vgsnapAfter.GetResourceVersion()).To(Equal(vgsnapBefore.GetResourceVersion()))
 					}
 				}
 			})
@@ -235,15 +413,21 @@ var _ = Describe("Cleanup", func() {
 			cleanupTypes := []client.Object{
 				&corev1.PersistentVolumeClaim{},
 				&snapv1.VolumeSnapshot{},
+				&vgsnapv1alpha1.VolumeGroupSnapshot{},
 			}
 
 			BeforeEach(func() {
 				// Mark snaps A1 and B1 for cleanup
 				utils.MarkForCleanup(rdA, snapA1)
 				Expect(k8sClient.Update(ctx, snapA1)).To(Succeed())
-
 				utils.MarkForCleanup(rdB, snapB1)
 				Expect(k8sClient.Update(ctx, snapB1)).To(Succeed())
+
+				// Mark volumegroupsnapshots A1 and B1 for cleanup
+				utils.MarkForCleanup(rdA, vgsnapA1)
+				Expect(k8sClient.Update(ctx, vgsnapA1)).To(Succeed())
+				utils.MarkForCleanup(rdB, vgsnapB1)
+				Expect(k8sClient.Update(ctx, vgsnapB1)).To(Succeed())
 
 				// Mark pvc A1 for cleanup
 				utils.MarkForCleanup(rdA, pvcA1)
@@ -262,6 +446,11 @@ var _ = Describe("Cleanup", func() {
 				Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(snapA2), snapA1)).To(Succeed())
 				// snapB1 should remain, different owner
 				Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(snapB1), snapB1)).To(Succeed())
+
+				// vgsnapA2 should remain, no cleanup label
+				Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(vgsnapA2), vgsnapA1)).To(Succeed())
+				// vgsnapB1 should remain, different owner
+				Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(vgsnapB1), vgsnapB1)).To(Succeed())
 
 				// Note pvcs have finalizer automatically so will not actually delete - but should be marked for deletion
 				// pvcA1 should be marked for deletion
@@ -292,7 +481,27 @@ var _ = Describe("Cleanup", func() {
 					Expect(len(remainingSnapList.Items)).To(Equal(3)) // Nothing should be deleted
 
 					Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(snapB1), snapB1)).To(Succeed())
-					validateCleanupLabelAndOwnerRefRemoved(snapB1)
+					Expect(validateCleanupLabelAndOwnerRefRemoved(snapB1)).To(Succeed())
+				})
+			})
+
+			Context("When a volumegroupsnapshot has the do-not-delete label and cleanup label", func() {
+				BeforeEach(func() {
+					// Mark B1 with do-not-delete
+					vgsnapB1.Labels[utils.DoNotDeleteLabelKey] = "true" // value should not matter
+					Expect(k8sClient.Update(ctx, vgsnapB1)).To(Succeed())
+				})
+
+				It("Should not cleanup the volumegroupsnapshot(s) marked with do-not-delete", func() {
+					Expect(utils.CleanupObjects(ctx, k8sClient, logger, rdB, cleanupTypes)).To(Succeed())
+
+					remainingVGSnapList := &vgsnapv1alpha1.VolumeGroupSnapshotList{}
+					Expect(k8sClient.List(ctx, remainingVGSnapList,
+						client.InNamespace(testNamespace.GetName()))).To(Succeed())
+					Expect(len(remainingVGSnapList.Items)).To(Equal(3)) // Nothing should be deleted
+
+					Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(vgsnapB1), vgsnapB1)).To(Succeed())
+					Expect(validateCleanupLabelAndOwnerRefRemoved(vgsnapB1)).To(Succeed())
 				})
 			})
 		})
@@ -304,6 +513,7 @@ var _ = Describe("Cleanup", func() {
 		// Call CleanupSnapshotsWithLabelCheck() directly here so we can test the precondition
 		Context("When cleaning up snapshots that have been modified since they were read", func() {
 			var snapsForCleanup *snapv1.VolumeSnapshotList
+			var vgsnapsForCleanup *vgsnapv1alpha1.VolumeGroupSnapshotList
 			var listOptions []client.ListOption
 			var err error
 
@@ -311,23 +521,42 @@ var _ = Describe("Cleanup", func() {
 				// Mark snaps A1 and A2 for cleanup
 				utils.MarkForCleanup(rdA, snapA1)
 				Expect(k8sClient.Update(ctx, snapA1)).To(Succeed())
-
 				utils.MarkForCleanup(rdA, snapA2)
 				Expect(k8sClient.Update(ctx, snapA2)).To(Succeed())
 
-				// Load our list of snapshots
-				snapsForCleanup = &snapv1.VolumeSnapshotList{}
+				// Mark vgsnaps A1 and A2 for cleanup
+				utils.MarkForCleanup(rdA, vgsnapA1)
+				Expect(k8sClient.Update(ctx, vgsnapA1)).To(Succeed())
+				utils.MarkForCleanup(rdA, vgsnapA2)
+				Expect(k8sClient.Update(ctx, vgsnapA2)).To(Succeed())
+
+				// Query by our volsync cleanup label
 				listOptions = []client.ListOption{
 					client.MatchingLabels{"volsync.backube/cleanup": string(rdA.GetUID())},
 					client.InNamespace(rdA.GetNamespace()),
 				}
+
+				// Load our list of snapshots
+				snapsForCleanup = &snapv1.VolumeSnapshotList{}
 				Expect(k8sClient.List(ctx, snapsForCleanup, listOptions...)).To(Succeed())
 
 				// Now modify one of the snapshots before calling the cleanup func
 				snapA2.Labels["test-label"] = "modified"
 				Expect(k8sClient.Update(ctx, snapA2)).To(Succeed())
 
-				err = utils.CleanupSnapshotsWithLabelCheck(ctx, k8sClient, logger, rdA, snapsForCleanup)
+				// Load our list of volumegroupsnapshots
+				vgsnapsForCleanup = &vgsnapv1alpha1.VolumeGroupSnapshotList{}
+				Expect(k8sClient.List(ctx, vgsnapsForCleanup, listOptions...)).To(Succeed())
+
+				snapObjsForCleanup := []client.Object{}
+				for i := range snapsForCleanup.Items {
+					snapObjsForCleanup = append(snapObjsForCleanup, &snapsForCleanup.Items[i])
+				}
+				for i := range vgsnapsForCleanup.Items {
+					snapObjsForCleanup = append(snapObjsForCleanup, &vgsnapsForCleanup.Items[i])
+				}
+
+				err = utils.CleanupSnapshotsOrVGSnapshotsWithLabelCheck(ctx, k8sClient, logger, rdA, snapObjsForCleanup)
 			})
 
 			It("Should not delete snapshots that have been modified", func() {
@@ -339,75 +568,55 @@ var _ = Describe("Cleanup", func() {
 				It("Should cleanup successfully after reloading the objects", func() {
 					// Re-load the list of snaps
 					Expect(k8sClient.List(ctx, snapsForCleanup, listOptions...)).To(Succeed())
+					Expect(k8sClient.List(ctx, vgsnapsForCleanup, listOptions...)).To(Succeed())
+
+					// make slice of client.Object
+					updatedSnapSlice := []client.Object{}
+					for i := range snapsForCleanup.Items {
+						updatedSnapSlice = append(updatedSnapSlice, &snapsForCleanup.Items[i])
+					}
+					for i := range vgsnapsForCleanup.Items {
+						updatedSnapSlice = append(updatedSnapSlice, &vgsnapsForCleanup.Items[i])
+					}
 
 					// Now the func should succeed
-					err = utils.CleanupSnapshotsWithLabelCheck(ctx, k8sClient, logger, rdA, snapsForCleanup)
+					err = utils.CleanupSnapshotsOrVGSnapshotsWithLabelCheck(ctx, k8sClient, logger, rdA, updatedSnapSlice)
 					Expect(err).NotTo(HaveOccurred())
 
+					// Confirm all snaphots except snapB1 are gone
 					remainingSnapList := &snapv1.VolumeSnapshotList{}
 					Expect(k8sClient.List(ctx, remainingSnapList,
 						client.InNamespace(testNamespace.GetName()))).To(Succeed())
 					Expect(len(remainingSnapList.Items)).To(Equal(1)) // only snapB1 should be left
 
 					Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(snapB1), snapB1)).To(Succeed())
+
+					// Confirm all volumegroupsnaphots except vgsnapB1 are gone
+					remainingVGSnapList := &vgsnapv1alpha1.VolumeGroupSnapshotList{}
+					Expect(k8sClient.List(ctx, remainingVGSnapList,
+						client.InNamespace(testNamespace.GetName()))).To(Succeed())
+					Expect(len(remainingVGSnapList.Items)).To(Equal(1)) // only vgsnapB1 should be left
+
+					Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(vgsnapB1), vgsnapB1)).To(Succeed())
 				})
-			})
-		})
-	})
-
-	Describe("Relinquish snapshots", func() {
-		Context("When some snapshots have the do-not-delete label", func() {
-			BeforeEach(func() {
-				// Mark snapA1 for cleanup and also add do-not-delete label
-				utils.MarkForCleanup(rdA, snapA1)
-				snapA1.Labels[utils.DoNotDeleteLabelKey] = "somevalue" // value should not matter
-				Expect(k8sClient.Update(ctx, snapA1)).To(Succeed())
-
-				// Mark snapA2 for cleanup only - should not get "relinquished/released"
-				utils.MarkForCleanup(rdA, snapA2)
-				Expect(k8sClient.Update(ctx, snapA2)).To(Succeed())
-			})
-
-			It("Should remove the cleanup label and replication destination ownership of the labelled snap", func() {
-				Expect(utils.RelinquishOwnedSnapshotsWithDoNotDeleteLabel(ctx, k8sClient, logger, rdA)).To(Succeed())
-
-				// SnapA1 should have cleanup label removed and ownership removed
-				Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(snapA1), snapA1)).To(Succeed())
-				validateCleanupLabelAndOwnerRefRemoved(snapA1)
-
-				// SnapA2 should still have cleanup label and ownership
-				Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(snapA2), snapA2)).To(Succeed())
-				validateCleanupLabelAndOwnerRef(snapA2, rdA)
-
-				// Run again and there should be no change
-				Expect(utils.RelinquishOwnedSnapshotsWithDoNotDeleteLabel(ctx, k8sClient, logger, rdA)).To(Succeed())
-
-				// Snap should not have been updated since cleanup label and ownership already removed
-				snapA1reload := &snapv1.VolumeSnapshot{}
-				Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(snapA1), snapA1reload)).To(Succeed())
-				Expect(snapA1.ResourceVersion).To(Equal(snapA1reload.ResourceVersion))
 			})
 		})
 	})
 })
 
 // This assumes there was only 1 owner ref at the start
-func validateCleanupLabelAndOwnerRefRemoved(obj client.Object) {
+func validateCleanupLabelAndOwnerRefRemoved(obj client.Object) error {
+	// Check for cleanup label, expecting it to be gone
 	labels := obj.GetLabels()
 	_, ok := labels["volsync.backube/cleanup"]
-	Expect(ok).To(BeFalse())                           // cleanup label should be removed
-	Expect(len(obj.GetOwnerReferences())).To(Equal(0)) // Owner ref should be removed as well
-}
+	if ok {
+		return fmt.Errorf("Label volsync.backube/cleanup is still present but should be removed")
+	}
 
-// This assumes there was only 1 owner ref at the start
-func validateCleanupLabelAndOwnerRef(obj client.Object, owner client.Object) {
-	labels := obj.GetLabels()
-	cleanupVal, ok := labels["volsync.backube/cleanup"]
-	Expect(ok).To(BeTrue()) // cleanup label should exist
-	Expect(cleanupVal).To(Equal(string(owner.GetUID())))
+	// Owner ref should be removed as well
+	if len(obj.GetOwnerReferences()) > 0 {
+		return fmt.Errorf("Owner reference is still present, expecting them to have been removed")
+	}
 
-	Expect(len(obj.GetOwnerReferences())).To(Equal(1)) // Owner ref should exist
-	ownerRef := obj.GetOwnerReferences()[0]
-	Expect(ownerRef.Kind).To(Equal("ReplicationDestination"))
-	Expect(ownerRef.Name).To(Equal(owner.GetName()))
+	return nil
 }
