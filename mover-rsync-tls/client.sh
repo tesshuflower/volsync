@@ -56,7 +56,6 @@ if [[ $DEBUG_MOVER -eq 1 && "$SCRIPT_DIR" != "/tmp" ]]; then
   exit 0
 fi
 
-PVC_LIST="${PVC_LIST:-}"
 PVC_NAME="${PVC_NAME:-}"
 PVC_COUNT="${PVC_COUNT:-1}"
 PVC_PORTS_FILE=/tmp/pvc-ports
@@ -180,19 +179,7 @@ while [[ ${rc} -ne 0 && ${RETRY} -lt ${MAX_RETRIES} ]]; do
       /diskrsync-tcp $BLOCK_SOURCE --source --target-address 127.0.0.1 --port $STUNNEL_LISTEN_PORT
       rc=$?
     else
-        # Find all files/dirs at root of pvc, prepend / to each (rsync will use SOURCE as the base dir for these files)
-        find "${SOURCE}" -mindepth 1 -maxdepth 1 -printf '/%P\n' > /tmp/filelist.txt
-        if [[ -s /tmp/filelist.txt ]]; then
-            # 1st run preserves as much as possible, but excludes the root directory
-            rsync -aAhHSxz -r --exclude=lost+found --itemize-changes --info=stats2,misc2 --files-from=/tmp/filelist.txt ${SOURCE}/ rsync://127.0.0.1:$STUNNEL_LISTEN_PORT/data
-        fi
-        #PVC_LIST="${SOURCE}"
-        #if [[ ${IS_VOLUME_GROUP} -eq 1 ]]; then
-        #  PVC_LIST=$(ls "${SOURCE}")
-        #  echo "Copying volume group of pvcs: PVC_LIST=${PVC_LIST} ..."
-        #fi
-        echo "==============================="
-        echo "PVC_LIST: ${PVC_LIST} ..."
+        echo "PVC_NAME: ${PVC_NAME} ..."
         echo "==============================="
         echo ""
         rc=0
@@ -218,10 +205,11 @@ while [[ ${rc} -ne 0 && ${RETRY} -lt ${MAX_RETRIES} ]]; do
         fi
 
         if [[ ${rc} -eq 0 ]]; then
-            ls -A "${SOURCE_DIR}"/ > /tmp/filelist.txt
+            echo "###### First pass #####"
+            # Find all files/dirs at root of pvc, prepend / to each (rsync will use SOURCE as the base dir for these files)
+            find "${SOURCE_DIR}" -mindepth 1 -maxdepth 1 -printf '/%P\n' > /tmp/filelist.txt
             if [[ -s /tmp/filelist.txt ]]; then
                 #TODO: remove this debug stuff
-                echo "###### First pass #####"
                 echo ""
                 find "${SOURCE}"
                 echo ">> SOURCE_DIR: ${SOURCE_DIR}"
@@ -235,7 +223,6 @@ while [[ ${rc} -ne 0 && ${RETRY} -lt ${MAX_RETRIES} ]]; do
                 echo "Skipping sync of empty source directory"
             fi
             rc_a=$?
-            shopt -u dotglob  # Back to default * behavior
 
             echo "###### Second pass (cleanup) #####"
             # To delete extra files, must sync at the directory-level, but need to avoid
