@@ -295,8 +295,15 @@ var _ = Describe("RsyncTLS as a source", func() {
 					rs.Spec.RsyncTLS.CopyMethod = volsyncv1alpha1.CopyMethodNone
 				})
 				It("the source is used as the data PVC", func() {
-					dataPVC, err := mover.ensureSourcePVC(ctx)
+					dataPVCGroup, err := mover.ensureSourcePVCs(ctx)
 					Expect(err).ToNot(HaveOccurred())
+					Expect(dataPVCGroup).NotTo(BeNil())
+					// Single PVC scenario
+					Expect(len(dataPVCGroup.pvcs)).To(Equal(1))
+					var dataPVC *corev1.PersistentVolumeClaim
+					for _, pvc := range dataPVCGroup.pvcs {
+						dataPVC = pvc // group will only contain 1 pvc
+					}
 					Expect(dataPVC.Name).To(Equal(sPVC.Name))
 					// It's not owned by the CR
 					Expect(dataPVC.OwnerReferences).To(BeEmpty())
@@ -309,8 +316,15 @@ var _ = Describe("RsyncTLS as a source", func() {
 					rs.Spec.RsyncTLS.CopyMethod = volsyncv1alpha1.CopyMethodDirect
 				})
 				It("the source is used as the data PVC", func() {
-					dataPVC, err := mover.ensureSourcePVC(ctx)
+					dataPVCGroup, err := mover.ensureSourcePVCs(ctx)
 					Expect(err).ToNot(HaveOccurred())
+					Expect(dataPVCGroup).NotTo(BeNil())
+					// Single PVC scenario
+					Expect(len(dataPVCGroup.pvcs)).To(Equal(1))
+					var dataPVC *corev1.PersistentVolumeClaim
+					for _, pvc := range dataPVCGroup.pvcs {
+						dataPVC = pvc // group will only contain 1 pvc
+					}
 					Expect(dataPVC.Name).To(Equal(sPVC.Name))
 					// It's not owned by the CR
 					Expect(dataPVC.OwnerReferences).To(BeEmpty())
@@ -323,8 +337,15 @@ var _ = Describe("RsyncTLS as a source", func() {
 					rs.Spec.RsyncTLS.CopyMethod = volsyncv1alpha1.CopyMethodClone
 				})
 				It("the source is NOT used as the data PVC", func() {
-					dataPVC, err := mover.ensureSourcePVC(ctx)
+					dataPVCGroup, err := mover.ensureSourcePVCs(ctx)
 					Expect(err).ToNot(HaveOccurred())
+					Expect(dataPVCGroup).NotTo(BeNil())
+					// Single PVC scenario
+					Expect(len(dataPVCGroup.pvcs)).To(Equal(1))
+					var dataPVC *corev1.PersistentVolumeClaim
+					for _, pvc := range dataPVCGroup.pvcs {
+						dataPVC = pvc // group will only contain 1 pvc
+					}
 					Expect(dataPVC.Name).NotTo(Equal(sPVC.Name))
 					// It's owned by the CR
 					Expect(dataPVC.OwnerReferences).NotTo(BeEmpty())
@@ -340,10 +361,10 @@ var _ = Describe("RsyncTLS as a source", func() {
 						Expect(k8sClient.Update(ctx, sPVC)).To(Succeed())
 					})
 					JustBeforeEach(func() {
-						dataPVC, err := mover.ensureSourcePVC(ctx)
-						Expect(err).NotTo(HaveOccurred())
+						dataPVCGroup, err := mover.ensureSourcePVCs(ctx)
+						Expect(err).ToNot(HaveOccurred())
 						// VolSync should not create the clone yet (Waiting on user-supplied copy-trigger)
-						Expect(dataPVC).To(BeNil())
+						Expect(dataPVCGroup).To(BeNil())
 
 						// re-load sPVC to see that volsync has added latest-copy-trigger annotation
 						// k8sClient is direct in this test, so no need for Eventually()
@@ -374,9 +395,9 @@ var _ = Describe("RsyncTLS as a source", func() {
 							Expect(k8sClient.Update(ctx, sPVC)).To(Succeed())
 
 							// Now run another ensureSourcePVC/reconcile
-							dataPVC, err := mover.ensureSourcePVC(ctx)
+							dataPVCGroup, err := mover.ensureSourcePVCs(ctx)
 							Expect(err).NotTo(HaveOccurred())
-							Expect(dataPVC).To(BeNil())
+							Expect(dataPVCGroup).To(BeNil())
 							// Err is not returned
 							// However the latestMoverStatus should be updated to show the error
 						})
@@ -395,9 +416,14 @@ var _ = Describe("RsyncTLS as a source", func() {
 
 							// Now run another ensureSourcePVC/reconcile
 							var err error
-							dataPVC, err = mover.ensureSourcePVC(ctx)
+							dataPVCGroup, err := mover.ensureSourcePVCs(ctx)
 							Expect(err).NotTo(HaveOccurred())
-							Expect(dataPVC).NotTo(BeNil()) // Should have proceeded to create the clone PVC
+							Expect(dataPVCGroup).NotTo(BeNil()) // Should have proceeded to create the clone PVC
+							Expect(len(dataPVCGroup.pvcs)).To(Equal(1))
+							for _, pvc := range dataPVCGroup.pvcs {
+								dataPVC = pvc
+								break
+							}
 
 							Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(sPVC), sPVC)).To(Succeed())
 							latestCopyStatus, ok := sPVC.Annotations[volsyncv1alpha1.LatestCopyStatusAnnotation]
@@ -422,10 +448,10 @@ var _ = Describe("RsyncTLS as a source", func() {
 								Expect(k8sClient.Status().Update(ctx, dataPVC)).To(Succeed())
 
 								// Now run another ensureSourcePVC/reconcile
-								var err error
-								dataPVC, err = mover.ensureSourcePVC(ctx)
+								dataPVCGroup, err := mover.ensureSourcePVCs(ctx)
 								Expect(err).NotTo(HaveOccurred())
-								Expect(dataPVC).NotTo(BeNil())
+								Expect(dataPVCGroup).NotTo(BeNil())
+								Expect(len(dataPVCGroup.pvcs)).To(Equal(1))
 
 								// re-load sourcePVC to see annotation updates
 								Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(sPVC), sPVC)).To(Succeed())
@@ -469,9 +495,9 @@ var _ = Describe("RsyncTLS as a source", func() {
 									}, timeout, interval).Should(BeTrue())
 
 									// Now run another ensureSourcePVC/reconcile
-									dataPVCClone2, err := mover.ensureSourcePVC(ctx)
+									dataPVCGroupClone2, err := mover.ensureSourcePVCs(ctx)
 									Expect(err).NotTo(HaveOccurred())
-									Expect(dataPVCClone2).To(BeNil())
+									Expect(dataPVCGroupClone2).To(BeNil())
 
 									// re-load sPVC to see that volsync has added latest-copy-trigger annotation
 									// k8sClient is direct in this test, so no need for Eventually()
@@ -503,10 +529,14 @@ var _ = Describe("RsyncTLS as a source", func() {
 										Expect(k8sClient.Update(ctx, sPVC)).To(Succeed())
 
 										// Now run another ensureSourcePVC/reconcile
-										var err error
-										dataPVCClone2, err = mover.ensureSourcePVC(ctx)
+										dataPVCGroupClone2, err := mover.ensureSourcePVCs(ctx)
 										Expect(err).NotTo(HaveOccurred())
-										Expect(dataPVCClone2).NotTo(BeNil()) // Should have proceeded to create the clone PVC
+										Expect(dataPVCGroupClone2).NotTo(BeNil()) // Should have proceeded to create the clone PVC
+										Expect(len(dataPVCGroupClone2.pvcs)).To(Equal(1))
+										for _, pvc := range dataPVCGroupClone2.pvcs {
+											dataPVCClone2 = pvc
+											break
+										}
 
 										Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(sPVC), sPVC)).To(Succeed())
 										latestCopyStatus, ok := sPVC.Annotations[volsyncv1alpha1.LatestCopyStatusAnnotation]
@@ -531,10 +561,10 @@ var _ = Describe("RsyncTLS as a source", func() {
 											Expect(k8sClient.Status().Update(ctx, dataPVCClone2)).To(Succeed())
 
 											// Now run another ensureSourcePVC/reconcile
-											var err error
-											dataPVCClone2, err = mover.ensureSourcePVC(ctx)
+											dataPVCGroupClone2, err := mover.ensureSourcePVCs(ctx)
 											Expect(err).NotTo(HaveOccurred())
-											Expect(dataPVCClone2).NotTo(BeNil())
+											Expect(dataPVCGroupClone2).NotTo(BeNil())
+											Expect(len(dataPVCGroupClone2.pvcs)).To(Equal(1))
 
 											// re-load sourcePVC to see annotation updates
 											Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(sPVC), sPVC)).To(Succeed())
@@ -565,7 +595,7 @@ var _ = Describe("RsyncTLS as a source", func() {
 					rs.Spec.RsyncTLS.CopyMethod = volsyncv1alpha1.CopyMethodSnapshot
 				})
 				It("the source is not used as data pvc, snapshot is created", func() {
-					_, err := mover.ensureSourcePVC(ctx)
+					_, err := mover.ensureSourcePVCs(ctx)
 					Expect(err).ToNot(HaveOccurred())
 
 					// Snapshot should have been created
@@ -581,10 +611,15 @@ var _ = Describe("RsyncTLS as a source", func() {
 					}
 					Expect(k8sClient.Status().Update(ctx, &snapshot)).To(Succeed())
 
-					var dataPVC *corev1.PersistentVolumeClaim
-					dataPVC, err = mover.ensureSourcePVC(ctx)
+					dataPVCGroup, err := mover.ensureSourcePVCs(ctx)
 					Expect(err).NotTo(HaveOccurred())
-					Expect(dataPVC).NotTo(BeNil())
+					Expect(dataPVCGroup).NotTo(BeNil())
+					// Single PVC scenario
+					Expect(len(dataPVCGroup.pvcs)).To(Equal(1))
+					var dataPVC *corev1.PersistentVolumeClaim
+					for _, pvc := range dataPVCGroup.pvcs {
+						dataPVC = pvc // group will only contain 1 pvc
+					}
 					Expect(dataPVC.Name).NotTo(Equal(sPVC.Name))
 					// It's owned by the CR
 					Expect(dataPVC.OwnerReferences).NotTo(BeEmpty())
@@ -604,10 +639,10 @@ var _ = Describe("RsyncTLS as a source", func() {
 						Expect(k8sClient.Update(ctx, sPVC)).To(Succeed())
 					})
 					JustBeforeEach(func() {
-						dataPVC, err := mover.ensureSourcePVC(ctx)
+						dataPVCGroup, err := mover.ensureSourcePVCs(ctx)
 						Expect(err).NotTo(HaveOccurred())
 						// VolSync should not create the snap or pvc-from-snap yet (Waiting on user-supplied copy-trigger)
-						Expect(dataPVC).To(BeNil())
+						Expect(dataPVCGroup).To(BeNil())
 
 						snapshots := &snapv1.VolumeSnapshotList{}
 						Expect(k8sClient.List(ctx, snapshots, client.InNamespace(rs.Namespace))).To(Succeed())
@@ -642,9 +677,9 @@ var _ = Describe("RsyncTLS as a source", func() {
 							Expect(k8sClient.Update(ctx, sPVC)).To(Succeed())
 
 							// Now run another ensureSourcePVC/reconcile
-							dataPVC, err := mover.ensureSourcePVC(ctx)
+							dataPVCGroup, err := mover.ensureSourcePVCs(ctx)
 							Expect(err).NotTo(HaveOccurred())
-							Expect(dataPVC).To(BeNil())
+							Expect(dataPVCGroup).To(BeNil())
 							// Err is not returned
 							// However the latestMoverStatus should be updated to show the error
 						})
@@ -663,10 +698,9 @@ var _ = Describe("RsyncTLS as a source", func() {
 							Expect(k8sClient.Update(ctx, sPVC)).To(Succeed())
 
 							// Now run another ensureSourcePVC/reconcile
-							var err error
-							firstSyncDataPVC, err = mover.ensureSourcePVC(ctx)
+							firstSyncDataPVCGroup, err := mover.ensureSourcePVCs(ctx)
 							Expect(err).NotTo(HaveOccurred())
-							Expect(firstSyncDataPVC).To(BeNil()) // Will not create the PVC as snapshot isn't ready yet
+							Expect(firstSyncDataPVCGroup).To(BeNil()) // Will not create the PVC as snapshot isn't ready yet
 
 							// Snapshot however should have been created
 							snapshots := &snapv1.VolumeSnapshotList{}
@@ -701,10 +735,14 @@ var _ = Describe("RsyncTLS as a source", func() {
 								Expect(k8sClient.Status().Update(ctx, firstSyncSnapshot)).To(Succeed())
 
 								// Now run another ensureSourcePVC/reconcile
-								var err error
-								firstSyncDataPVC, err = mover.ensureSourcePVC(ctx)
+								firstSyncDataPVCGroup, err := mover.ensureSourcePVCs(ctx)
 								Expect(err).NotTo(HaveOccurred())
-								Expect(firstSyncDataPVC).NotTo(BeNil())
+								Expect(firstSyncDataPVCGroup).NotTo(BeNil())
+								Expect(len(firstSyncDataPVCGroup.pvcs)).To(Equal(1))
+								for _, pvc := range firstSyncDataPVCGroup.pvcs {
+									firstSyncDataPVC = pvc
+									break
+								}
 
 								// re-load sourcePVC to see annotation updates
 								Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(sPVC), sPVC)).To(Succeed())
@@ -754,9 +792,9 @@ var _ = Describe("RsyncTLS as a source", func() {
 									Expect(kerrors.IsNotFound(err))
 
 									// Now run another ensureSourcePVC/reconcile
-									dataPVCSnap2, err := mover.ensureSourcePVC(ctx)
+									dataPVCGroupSnap2, err := mover.ensureSourcePVCs(ctx)
 									Expect(err).NotTo(HaveOccurred())
-									Expect(dataPVCSnap2).To(BeNil())
+									Expect(dataPVCGroupSnap2).To(BeNil())
 
 									// No new snap should be created yet since we're waiting on the copy-trigger
 									snapshots := &snapv1.VolumeSnapshotList{}
@@ -785,7 +823,6 @@ var _ = Describe("RsyncTLS as a source", func() {
 									Expect(latestCopyTrigger).To(Equal("first-t"))
 								})
 								When("The user updates the copy-trigger to a new value", func() {
-									var secondDataPVC *corev1.PersistentVolumeClaim
 									var secondSyncSnapshot *snapv1.VolumeSnapshot
 
 									JustBeforeEach(func() {
@@ -794,10 +831,9 @@ var _ = Describe("RsyncTLS as a source", func() {
 										Expect(k8sClient.Update(ctx, sPVC)).To(Succeed())
 
 										// Now run another ensureSourcePVC/reconcile
-										var err error
-										secondDataPVC, err = mover.ensureSourcePVC(ctx)
+										secondDataPVCGroup, err := mover.ensureSourcePVCs(ctx)
 										Expect(err).NotTo(HaveOccurred())
-										Expect(secondDataPVC).To(BeNil()) // No PVC should exists yet since snap is not ready
+										Expect(secondDataPVCGroup).To(BeNil()) // No PVC should exists yet since snap is not ready
 
 										// Snapshot however should have been created
 										snapshots := &snapv1.VolumeSnapshotList{}
@@ -833,9 +869,10 @@ var _ = Describe("RsyncTLS as a source", func() {
 
 											// Now run another ensureSourcePVC/reconcile
 											var err error
-											secondDataPVC, err = mover.ensureSourcePVC(ctx)
+											secondDataPVCGroup, err := mover.ensureSourcePVCs(ctx)
 											Expect(err).NotTo(HaveOccurred())
-											Expect(secondDataPVC).NotTo(BeNil())
+											Expect(secondDataPVCGroup).NotTo(BeNil())
+											Expect(len(secondDataPVCGroup.pvcs)).To(Equal(1))
 
 											// re-load sourcePVC to see annotation updates
 											Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(sPVC), sPVC)).To(Succeed())
@@ -937,8 +974,10 @@ var _ = Describe("RsyncTLS as a source", func() {
 
 					// Check exported secret from status
 					secret1 := &corev1.Secret{}
-					Expect(k8sClient.Get(ctx, types.NamespacedName{Name: *rs.Status.RsyncTLS.KeySecret,
-						Namespace: rs.Namespace}, secret1)).To(Succeed())
+					Expect(k8sClient.Get(ctx, types.NamespacedName{
+						Name:      *rs.Status.RsyncTLS.KeySecret,
+						Namespace: rs.Namespace,
+					}, secret1)).To(Succeed())
 					Expect(secret1.Data).To(HaveKey("psk.txt"))
 					Expect(ownerMatches(secret1, rs.GetName(), true)).To(BeTrue())
 				})
@@ -1078,8 +1117,8 @@ var _ = Describe("RsyncTLS as a source", func() {
 
 		Context("Mover Job is handled properly", func() {
 			var jobName string
-			var pvcCount = 1
-			var tgtPortMapping = ""
+			pvcCount := 1
+			tgtPortMapping := ""
 			var sa *corev1.ServiceAccount
 			var tlsKeySecret *corev1.Secret
 			var job *batchv1.Job
@@ -1193,7 +1232,7 @@ var _ = Describe("RsyncTLS as a source", func() {
 					for _, volMount := range c.VolumeMounts {
 						if volMount.Name == dataVolumeName {
 							foundDataVolumeMount = true
-							Expect(volMount.MountPath).To(Equal(mountPath))
+							Expect(volMount.MountPath).To(Equal(baseMountPath))
 						} else if volMount.Name == "keys" {
 							foundTLSSecretVolumeMount = true
 							Expect(volMount.MountPath).To(Equal("/keys"))
@@ -1265,7 +1304,7 @@ var _ = Describe("RsyncTLS as a source", func() {
 						for _, volMount := range c.VolumeMounts {
 							if volMount.Name == dataVolumeName {
 								foundDataVolumeMount = true
-								Expect(volMount.MountPath).To(Equal(mountPath))
+								Expect(volMount.MountPath).To(Equal(baseMountPath))
 							} else if volMount.Name == "keys" {
 								foundTLSSecretVolumeMount = true
 								Expect(volMount.MountPath).To(Equal("/keys"))
@@ -1796,8 +1835,10 @@ var _ = Describe("Rsync as a destination", func() {
 					Expect(*rd.Status.RsyncTLS.KeySecret).To(Equal(*keyName))
 
 					secret := &corev1.Secret{}
-					Expect(k8sClient.Get(ctx, types.NamespacedName{Name: *rd.Status.RsyncTLS.KeySecret,
-						Namespace: rd.Namespace}, secret)).To(Succeed())
+					Expect(k8sClient.Get(ctx, types.NamespacedName{
+						Name:      *rd.Status.RsyncTLS.KeySecret,
+						Namespace: rd.Namespace,
+					}, secret)).To(Succeed())
 					Expect(secret.Data).To(HaveKey("psk.txt"))
 					Expect(ownerMatches(secret, rd.GetName(), false)).To(BeTrue())
 				})
@@ -2017,7 +2058,6 @@ var _ = Describe("Rsync as a destination", func() {
 				}
 				dPVC.Annotations["volsync.backube/snapname"] = "testisafakesnapshotannoation"
 				Expect(k8sClient.Update(ctx, dPVC)).To(Succeed())
-
 			})
 			JustBeforeEach(func() {
 				uid := rd.GetUID() // UID will only be here after RD is created (hence not putting in BeforeEach)
@@ -2073,7 +2113,7 @@ var _ = Describe("Rsync as a destination", func() {
 				_, ok := snap1.GetLabels()["volsync.backube/cleanup"]
 				Expect(ok).To(BeTrue())
 
-				//Reload snap2 and update status
+				// Reload snap2 and update status
 				Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(snap2), snap2)).To(Succeed())
 				// Update RD status to indicate snap3 is the latestImage
 				rd.Status.LatestImage = &corev1.TypedLocalObjectReference{

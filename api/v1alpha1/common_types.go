@@ -181,6 +181,7 @@ type SourcePVCGroup struct {
 	//TODO: See:  https://github.com/kubernetes-csi/external-snapshotter/blob/cdbbb78ff88de2d72bdeb2e3bb30f81e12128a55/client/apis/volumegroupsnapshot/v1alpha1/types.go#L31
 	Selector metav1.LabelSelector `json:"selector,omitempty"`
 
+	/* Moved to ReplicationSourceVolumeOptions to be consistent with VolumeSnapshotClassName
 	// VolumeGroupSnapshotClassName is the name of the VolumeGroupSnapshotClass
 	// requested by the VolumeGroupSnapshot.
 	// VolumeGroupSnapshotClassName may be left nil to indicate that the default
@@ -188,6 +189,7 @@ type SourcePVCGroup struct {
 	// Empty string is not allowed for this field.
 	// +optional
 	VolumeGroupSnapshotClassName *string `json:"volumeGroupSnapshotClassName,omitempty"`
+	*/
 }
 
 // TODO: rename, perhaps move somewhere?
@@ -201,8 +203,8 @@ type DestinationPVCGroupMember struct {
 	Name string `json:"name"`
 	// Name the replicationdestination should use for its PVC to replicate into - if not specified, Name will be used.
 	//+optional
-	TempPVCName string `json:"tempPVCName,omitempty"` //TODO: rename field?
-	//TODO: size, spec stuff
+	TempPVCName string `json:"tempPVCName,omitempty"` // TODO: rename field?
+	// TODO: size, spec stuff
 }
 
 func (m DestinationPVCGroupMember) GetOriginalPVCName() string {

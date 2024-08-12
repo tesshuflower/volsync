@@ -48,8 +48,7 @@ import (
 )
 
 const (
-	mountPath        = "/data"
-	baseMountPath    = mountPath // FIXME: remove
+	baseMountPath    = "/data"
 	devicePath       = "/dev/block"
 	dataVolumeName   = "data"
 	tlsContainerPort = 8000
@@ -369,6 +368,7 @@ func (m *Mover) Cleanup(ctx context.Context) (mover.Result, error) {
 	return mover.Complete(), nil
 }
 
+/*
 func (m *Mover) ensureSourcePVC(ctx context.Context) (*corev1.PersistentVolumeClaim, error) {
 	srcPVC := &corev1.PersistentVolumeClaim{
 		ObjectMeta: metav1.ObjectMeta{
@@ -395,8 +395,8 @@ func (m *Mover) ensureSourcePVC(ctx context.Context) (*corev1.PersistentVolumeCl
 	}
 	return pvc, nil
 }
+*/
 
-// func (m *Mover) ensureSourcePVCs(ctx context.Context) (*corev1.PersistentVolumeClaim, error) {
 // TODO: can this be moved to the volumehandler?
 func (m *Mover) ensureSourcePVCs(ctx context.Context) (*pvcGroup, error) {
 	srcPVCGroup := pvcGroup{}
@@ -434,9 +434,22 @@ func (m *Mover) ensureSourcePVCs(ctx context.Context) (*pvcGroup, error) {
 		}
 		dataName := mover.VolSyncPrefix + m.owner.GetName() + "-" + m.direction()
 		pvc, err := m.vh.EnsurePVCFromSrc(ctx, m.logger, srcPVC, dataName, true)
-		if err != nil || pvc == nil {
+		if err != nil {
+			// If the error was a copy TriggerTimeoutError, update the latestMoverStatus to indicate error
+			var copyTriggerTimeoutError *vserrors.CopyTriggerTimeoutError
+			if errors.As(err, &copyTriggerTimeoutError) {
+				utils.UpdateMoverStatusFailed(m.latestMoverStatus, copyTriggerTimeoutError.Error())
+				// Don't return error - we want to keep reconciling at the normal in-progress rate
+				// but just indicate in the latestMoverStatus that there is an error (we've been waiting
+				// for the user to update the copy Trigger for too long)
+				return nil, nil
+			}
 			return nil, err
 		}
+		if pvc == nil {
+			return nil, nil
+		}
+		// TODO: Should we use pvc name like we do for vgsnaps? (instead of "data")
 		srcPVCGroup.pvcs = map[string]*corev1.PersistentVolumeClaim{"data": pvc}
 	}
 

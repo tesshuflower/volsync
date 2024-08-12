@@ -80,6 +80,7 @@ func FromSource(s *volsyncv1alpha1.ReplicationSourceVolumeOptions) VHOption {
 		vh.storageClassName = s.StorageClassName
 		vh.accessModes = s.AccessModes
 		vh.volumeSnapshotClassName = s.VolumeSnapshotClassName
+		vh.volumeGroupSnapshotClassName = s.VolumeGroupSnapshotClassName
 	}
 }
 
@@ -92,6 +93,7 @@ func FromDestination(d *volsyncv1alpha1.ReplicationDestinationVolumeOptions) VHO
 		vh.storageClassName = d.StorageClassName
 		vh.accessModes = d.AccessModes
 		vh.volumeSnapshotClassName = d.VolumeSnapshotClassName
+		vh.volumeGroupSnapshotClassName = d.VolumeGroupSnapshotClassName
 	}
 }
 

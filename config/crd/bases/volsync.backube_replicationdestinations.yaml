@@ -1374,6 +1374,12 @@ spec:
                       storageClassName can be used to specify the StorageClass of the
                       destination volume. If not set, the default StorageClass will be used.
                     type: string
+                  volumeGroupSnapshotClassName:
+                    description: |-
+                      volumegroupsnapshotclassname can be used to specify the volumegroup snapshot class to
+                      be used if the copyMethod is Snapshot. If not set, the default volumegroupsnapshotclass
+                      is used.
+                    type: string
                   volumeSnapshotClassName:
                     description: |-
                       volumeSnapshotClassName can be used to specify the VSC to be used if
@@ -2699,6 +2705,12 @@ spec:
                       storageClassName can be used to specify the StorageClass of the
                       destination volume. If not set, the default StorageClass will be used.
                     type: string
+                  volumeGroupSnapshotClassName:
+                    description: |-
+                      volumegroupsnapshotclassname can be used to specify the volumegroup snapshot class to
+                      be used if the copyMethod is Snapshot. If not set, the default volumegroupsnapshotclass
+                      is used.
+                    type: string
                   volumeSnapshotClassName:
                     description: |-
                       volumeSnapshotClassName can be used to specify the VSC to be used if
@@ -2878,6 +2890,12 @@ spec:
                     description: |-
                       storageClassName can be used to specify the StorageClass of the
                       destination volume. If not set, the default StorageClass will be used.
+                    type: string
+                  volumeGroupSnapshotClassName:
+                    description: |-
+                      volumegroupsnapshotclassname can be used to specify the volumegroup snapshot class to
+                      be used if the copyMethod is Snapshot. If not set, the default volumegroupsnapshotclass
+                      is used.
                     type: string
                   volumeSnapshotClassName:
                     description: |-
@@ -4169,6 +4187,12 @@ spec:
                     description: |-
                       storageClassName can be used to specify the StorageClass of the
                       destination volume. If not set, the default StorageClass will be used.
+                    type: string
+                  volumeGroupSnapshotClassName:
+                    description: |-
+                      volumegroupsnapshotclassname can be used to specify the volumegroup snapshot class to
+                      be used if the copyMethod is Snapshot. If not set, the default volumegroupsnapshotclass
+                      is used.
                     type: string
                   volumeSnapshotClassName:
                     description: |-

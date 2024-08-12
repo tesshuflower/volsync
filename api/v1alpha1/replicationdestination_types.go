@@ -79,6 +79,11 @@ type ReplicationDestinationVolumeOptions struct {
 	// copyMethod is Snapshot. If not set, the default VSC is used.
 	//+optional
 	VolumeSnapshotClassName *string `json:"volumeSnapshotClassName,omitempty"`
+	// volumegroupsnapshotclassname can be used to specify the volumegroup snapshot class to
+	// be used if the copyMethod is Snapshot. If not set, the default volumegroupsnapshotclass
+	// is used.
+	//+optional
+	VolumeGroupSnapshotClassName *string `json:"volumeGroupSnapshotClassName,omitempty"`
 	// destinationPVC is a PVC to use as the transfer destination instead of
 	// automatically provisioning one. Either this field or both capacity and
 	// accessModes must be specified.
@@ -140,7 +145,7 @@ type ReplicationDestinationRsyncSpec struct {
 // ReplicationDestinationRcloneSpec defines the field for rclone in replicationDestination.
 type ReplicationDestinationRcloneSpec struct {
 	ReplicationDestinationVolumeOptions `json:",inline"`
-	//RcloneConfigSection is the section in rclone_config file to use for the current job.
+	// RcloneConfigSection is the section in rclone_config file to use for the current job.
 	RcloneConfigSection *string `json:"rcloneConfigSection,omitempty"`
 	// RcloneDestPath is the remote path to sync to.
 	RcloneDestPath *string `json:"rcloneDestPath,omitempty"`

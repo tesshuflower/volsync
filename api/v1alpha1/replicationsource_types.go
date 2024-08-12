@@ -91,6 +91,11 @@ type ReplicationSourceVolumeOptions struct {
 	// copyMethod is Snapshot. If not set, the default VSC is used.
 	//+optional
 	VolumeSnapshotClassName *string `json:"volumeSnapshotClassName,omitempty"`
+	// volumegroupsnapshotclassname can be used to specify the volumegroup snapshot class to
+	// be used if the copyMethod is Snapshot. If not set, the default volumegroupsnapshotclass
+	// is used.
+	//+optional
+	VolumeGroupSnapshotClassName *string `json:"volumeGroupSnapshotClassName,omitempty"`
 }
 
 type ReplicationSourceRsyncSpec struct {
@@ -139,7 +144,7 @@ type ReplicationSourceRsyncSpec struct {
 // ReplicationSourceRcloneSpec defines the field for rclone in replicationSource.
 type ReplicationSourceRcloneSpec struct {
 	ReplicationSourceVolumeOptions `json:",inline"`
-	//RcloneConfigSection is the section in rclone_config file to use for the current job.
+	// RcloneConfigSection is the section in rclone_config file to use for the current job.
 	RcloneConfigSection *string `json:"rcloneConfigSection,omitempty"`
 	// RcloneDestPath is the remote path to sync to.
 	RcloneDestPath *string `json:"rcloneDestPath,omitempty"`

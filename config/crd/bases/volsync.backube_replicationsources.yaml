@@ -1347,6 +1347,12 @@ spec:
                       storageClassName can be used to override the StorageClass of the PiT
                       image.
                     type: string
+                  volumeGroupSnapshotClassName:
+                    description: |-
+                      volumegroupsnapshotclassname can be used to specify the volumegroup snapshot class to
+                      be used if the copyMethod is Snapshot. If not set, the default volumegroupsnapshotclass
+                      is used.
+                    type: string
                   volumeSnapshotClassName:
                     description: |-
                       volumeSnapshotClassName can be used to specify the VSC to be used if
@@ -2683,6 +2689,12 @@ spec:
                       then ran a backup.
                       Unlock will not be run again unless spec.restic.unlock is set to a different value.
                     type: string
+                  volumeGroupSnapshotClassName:
+                    description: |-
+                      volumegroupsnapshotclassname can be used to specify the volumegroup snapshot class to
+                      be used if the copyMethod is Snapshot. If not set, the default volumegroupsnapshotclass
+                      is used.
+                    type: string
                   volumeSnapshotClassName:
                     description: |-
                       volumeSnapshotClassName can be used to specify the VSC to be used if
@@ -2824,6 +2836,12 @@ spec:
                     description: |-
                       storageClassName can be used to override the StorageClass of the PiT
                       image.
+                    type: string
+                  volumeGroupSnapshotClassName:
+                    description: |-
+                      volumegroupsnapshotclassname can be used to specify the volumegroup snapshot class to
+                      be used if the copyMethod is Snapshot. If not set, the default volumegroupsnapshotclass
+                      is used.
                     type: string
                   volumeSnapshotClassName:
                     description: |-
@@ -4083,6 +4101,12 @@ spec:
                       storageClassName can be used to override the StorageClass of the PiT
                       image.
                     type: string
+                  volumeGroupSnapshotClassName:
+                    description: |-
+                      volumegroupsnapshotclassname can be used to specify the volumegroup snapshot class to
+                      be used if the copyMethod is Snapshot. If not set, the default volumegroupsnapshotclass
+                      is used.
+                    type: string
                   volumeSnapshotClassName:
                     description: |-
                       volumeSnapshotClassName can be used to specify the VSC to be used if
@@ -4145,14 +4169,6 @@ spec:
                         type: object
                     type: object
                     x-kubernetes-map-type: atomic
-                  volumeGroupSnapshotClassName:
-                    description: |-
-                      VolumeGroupSnapshotClassName is the name of the VolumeGroupSnapshotClass
-                      requested by the VolumeGroupSnapshot.
-                      VolumeGroupSnapshotClassName may be left nil to indicate that the default
-                      class will be used.
-                      Empty string is not allowed for this field.
-                    type: string
                 type: object
               syncthing:
                 description: syncthing defines the configuration when using Syncthing-based

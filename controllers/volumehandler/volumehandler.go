@@ -51,15 +51,15 @@ const (
 )
 
 type VolumeHandler struct {
-	client           client.Client
-	eventRecorder    events.EventRecorder
-	owner            client.Object
-	copyMethod       volsyncv1alpha1.CopyMethodType
-	capacity         *resource.Quantity
-	storageClassName *string
-	accessModes      []corev1.PersistentVolumeAccessMode
-	// volumeMode              corev1.PersistentVolumeMode
-	volumeSnapshotClassName *string
+	client                       client.Client
+	eventRecorder                events.EventRecorder
+	owner                        client.Object
+	copyMethod                   volsyncv1alpha1.CopyMethodType
+	capacity                     *resource.Quantity
+	storageClassName             *string
+	accessModes                  []corev1.PersistentVolumeAccessMode
+	volumeSnapshotClassName      *string
+	volumeGroupSnapshotClassName *string
 }
 
 /*
@@ -68,12 +68,12 @@ func (vh VolumeHandler) EnsurePVCsFromSrc(ctx context.Context, log logr.Logger,
 */
 
 func (vh *VolumeHandler) EnsureGroupPVCsFromSrc(ctx context.Context, log logr.Logger,
-	pvcLabelSelector *metav1.LabelSelector, groupName string, isTemporary bool,
+	vgPVCLabelSelector *metav1.LabelSelector, groupName string, isTemporary bool,
 ) (map[string]*corev1.PersistentVolumeClaim, error) {
 	// TODO: do we care to check if the copyMethod is snapshot?  It will need to be unless we support
 	// passing in a list of PVCs or an existing volumegroupsnapshot?
 
-	groupSnap, err := vh.ensureGroupSnapshot(ctx, log, pvcLabelSelector, groupName, isTemporary)
+	groupSnap, err := vh.ensureGroupSnapshot(ctx, log, vgPVCLabelSelector, groupName, isTemporary)
 	if groupSnap == nil || err != nil {
 		return nil, err
 	}
@@ -370,7 +370,7 @@ func (vh *VolumeHandler) ensureImageGroupSnapshot(ctx context.Context, log logr.
 				Source: vgsnapv1alpha1.VolumeGroupSnapshotSource{
 					Selector: pvcLabelSelector,
 				},
-				// FIXME: VolumeGroupSnapshotClassName: vh.VolumeGroupSnapshotClassName,
+				VolumeGroupSnapshotClassName: vh.volumeGroupSnapshotClassName,
 			}
 		}
 		return nil
@@ -626,7 +626,7 @@ func (vh *VolumeHandler) ensureClone(ctx context.Context, log logr.Logger,
 
 //nolint:funlen
 func (vh *VolumeHandler) ensureGroupSnapshot(ctx context.Context, log logr.Logger,
-	pvcLabelSelector *metav1.LabelSelector, groupName string, isTemporary bool,
+	vgPVCLabelSelector *metav1.LabelSelector, groupName string, isTemporary bool,
 ) (*vgsnapv1alpha1.VolumeGroupSnapshot, error) {
 	groupSnap := &vgsnapv1alpha1.VolumeGroupSnapshot{
 		ObjectMeta: metav1.ObjectMeta{
@@ -635,6 +635,20 @@ func (vh *VolumeHandler) ensureGroupSnapshot(ctx context.Context, log logr.Logge
 		},
 	}
 	logger := log.WithValues("groupsnapshot", client.ObjectKeyFromObject(groupSnap))
+
+	// See if the vgsnapshot exists
+	err := vh.client.Get(ctx, client.ObjectKeyFromObject(groupSnap), groupSnap)
+	if err != nil {
+		if !kerrors.IsNotFound(err) {
+			return nil, err
+		}
+
+		// Need to create the vgsnapshot - see if we need to wait first for a copy-trigger
+		wait, err := vh.waitForCopyTriggerBeforeVGSnap(ctx, log, vgPVCLabelSelector)
+		if wait || err != nil {
+			return nil, err
+		}
+	}
 
 	op, err := ctrlutil.CreateOrUpdate(ctx, vh.client, groupSnap, func() error {
 		if err := ctrl.SetControllerReference(vh.owner, groupSnap, vh.client.Scheme()); err != nil {
@@ -648,9 +662,9 @@ func (vh *VolumeHandler) ensureGroupSnapshot(ctx context.Context, log logr.Logge
 		if groupSnap.CreationTimestamp.IsZero() {
 			groupSnap.Spec = vgsnapv1alpha1.VolumeGroupSnapshotSpec{
 				Source: vgsnapv1alpha1.VolumeGroupSnapshotSource{
-					Selector: pvcLabelSelector,
+					Selector: vgPVCLabelSelector,
 				},
-				// FIXME: VolumeGroupSnapshotClassName: vh.VolumeGroupSnapshotClassName,
+				VolumeGroupSnapshotClassName: vh.volumeGroupSnapshotClassName,
 			}
 		}
 		return nil
@@ -667,7 +681,7 @@ func (vh *VolumeHandler) ensureGroupSnapshot(ctx context.Context, log logr.Logge
 		vh.eventRecorder.Eventf(vh.owner, groupSnap, corev1.EventTypeNormal,
 			volsyncv1alpha1.EvRSnapCreated, volsyncv1alpha1.EvACreateVGSnap,
 			"created %s from labelSelector %s",
-			utils.KindAndName(vh.client.Scheme(), groupSnap), pvcLabelSelector)
+			utils.KindAndName(vh.client.Scheme(), groupSnap), vgPVCLabelSelector)
 	}
 	if groupSnap.Status == nil || groupSnap.Status.BoundVolumeGroupSnapshotContentName == nil {
 		logger.V(1).Info("waiting for snapshot to be bound")
@@ -686,6 +700,12 @@ func (vh *VolumeHandler) ensureGroupSnapshot(ctx context.Context, log logr.Logge
 	}
 	// status.readyToUse either is not set by the driver at this point (even though
 	// status.BoundVolumeGroupSnapshotContentName is set), or readyToUse=true
+
+	// vgsnapshot is ready - update copy trigger on PVC(s) in group if necessary
+	err = vh.updateCopyTriggerAfterVGSnap(ctx, groupSnap)
+	if err != nil {
+		return groupSnap, err
+	}
 
 	logger.V(1).Info("temporary group snapshot reconciled", "operation", op)
 	return groupSnap, nil
@@ -836,6 +856,48 @@ func (vh *VolumeHandler) ensureSnapshot(ctx context.Context, log logr.Logger,
 	return snap, nil
 }
 
+// Checks if copy trigger annotations are on any srcPVC for a volumegroup selector and updates accordingly
+// This should be called when volumegroupsnapshot does not exist in order to determine
+// if we should wait before creation.
+//
+// If any PVC in the volumegroup (found via the volumesnapshot group selector) has a copy trigger,
+// go through the normal copy trigger flow. This way a user could just put/interact with the copy trigger
+// annotations on a single PVC in their group.
+func (vh *VolumeHandler) waitForCopyTriggerBeforeVGSnap(ctx context.Context, log logr.Logger,
+	vgPVCLabelSelector *metav1.LabelSelector,
+) (bool, error) {
+	// FIXME: make sure covered by unit tests
+	pvcSelector, err := metav1.LabelSelectorAsSelector(vgPVCLabelSelector)
+	if err != nil {
+		return false, err
+	}
+	listOptions := []client.ListOption{
+		client.MatchingLabelsSelector{Selector: pvcSelector},
+		client.InNamespace(vh.owner.GetNamespace()),
+	}
+
+	// This is the list of PVCs (currently) that would be grouped in a VGSnapshot using the vgPVCLabelSelector
+	groupPVCList := &corev1.PersistentVolumeClaimList{}
+	err = vh.client.List(ctx, groupPVCList, listOptions...)
+	if err != nil {
+		return false, err
+	}
+
+	waitForGroup := false
+	for i := range groupPVCList.Items {
+		pvc := groupPVCList.Items[i]
+		waitForPVC, err := vh.waitForCopyTriggerBeforeCloneOrSnap(ctx, log, &pvc)
+		if err != nil {
+			return false, nil
+		}
+		// If any pvc needs to be waited for due to a copy trigger, we need to wait for the whole group
+		// But keep processing the list so we update all copy triggers where necessary on all pvcs in the group
+		waitForGroup = waitForGroup || waitForPVC
+	}
+
+	return waitForGroup, nil
+}
+
 // Checks if copy trigger annotations are on the srcPVC and updates accordingly
 // This should be called when clone/snapshot does not exist in order to determine
 // if we should wait before creation.
@@ -910,6 +972,33 @@ func (vh *VolumeHandler) waitForCopyTriggerBeforeCloneOrSnap(ctx context.Context
 
 	// No need to wait, we're in progress (but snapshot/clone doesn't exist yet)
 	return false, nil
+}
+
+func (vh *VolumeHandler) updateCopyTriggerAfterVGSnap(ctx context.Context, vgsnap *vgsnapv1alpha1.VolumeGroupSnapshot,
+) error {
+	// FIXME: unit tests
+
+	// Go through and update each PVC that uses copy triggers - instead of using the vg pvc selector,
+	// iterate over the list of PVCs that got included in the vg snapshot
+	for _, pvcSnapshotPair := range vgsnap.Status.PVCVolumeSnapshotRefList {
+		srcPVC := &corev1.PersistentVolumeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      pvcSnapshotPair.PersistentVolumeClaimRef.Name,
+				Namespace: vh.owner.GetNamespace(),
+			},
+		}
+		err := vh.client.Get(ctx, client.ObjectKeyFromObject(srcPVC), srcPVC)
+		if err != nil {
+			return err
+		}
+
+		// Update copy triggers for this individual pvc in the group if necessary
+		err = vh.updateCopyTriggerAfterCloneOrSnap(ctx, srcPVC)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (vh *VolumeHandler) updateCopyTriggerAfterCloneOrSnap(ctx context.Context,

@@ -196,6 +196,7 @@ while [[ ${rc} -ne 0 && ${RETRY} -lt ${MAX_RETRIES} ]]; do
             rc=$?
 
             if [[ ${rc} -eq 0 ]]; then
+                # For volumegroupsnapshot scenario - the mount point will be /data/<pvc_name>
                 SOURCE_DIR="${SOURCE}/${PVC_NAME}"
 
                 REMOTE_PORT=$(grep ">${PVC_NAME} " "${PVC_PORTS_FILE}" | awk '{print $2}')
