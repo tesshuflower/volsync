@@ -193,7 +193,7 @@ func (m *Mover) ensureDestinationPVC(ctx context.Context) (*corev1.PersistentVol
 		return m.vh.UseProvidedPVC(ctx, dataPVCName)
 	}
 	// Need to allocate the incoming data volume
-	return m.vh.EnsureNewPVC(ctx, m.logger, dataPVCName, nil)
+	return m.vh.EnsureNewPVC(ctx, m.logger, dataPVCName)
 }
 
 func (m *Mover) getDestinationPVCName() (bool, string) {
@@ -207,7 +207,8 @@ func (m *Mover) getDestinationPVCName() (bool, string) {
 //nolint:funlen
 func (m *Mover) ensureJob(ctx context.Context, dataPVC *corev1.PersistentVolumeClaim,
 	sa *corev1.ServiceAccount, rcloneConfigSecret *corev1.Secret,
-	customCAObj utils.CustomCAObject) (*batchv1.Job, error) {
+	customCAObj utils.CustomCAObject,
+) (*batchv1.Job, error) {
 	dir := "dst"
 	direction := "destination"
 
@@ -237,7 +238,7 @@ func (m *Mover) ensureJob(ctx context.Context, dataPVC *corev1.PersistentVolumeC
 		utils.MarkForCleanup(m.owner, job)
 		job.Spec.Template.ObjectMeta.Name = job.Name
 		utils.SetOwnedByVolSync(&job.Spec.Template)
-		backoffLimit := int32(2) //TODO: backofflimit was 8 for restic
+		backoffLimit := int32(2) // TODO: backofflimit was 8 for restic
 		job.Spec.BackoffLimit = &backoffLimit
 
 		parallelism := int32(1)
@@ -290,22 +291,28 @@ func (m *Mover) ensureJob(ctx context.Context, dataPVC *corev1.PersistentVolumeC
 		job.Spec.Template.Spec.RestartPolicy = corev1.RestartPolicyNever
 		job.Spec.Template.Spec.ServiceAccountName = sa.Name
 		job.Spec.Template.Spec.Volumes = []corev1.Volume{
-			{Name: dataVolumeName, VolumeSource: corev1.VolumeSource{
-				PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
-					ClaimName: dataPVC.Name,
-					ReadOnly:  readOnlyVolume,
-				}},
+			{
+				Name: dataVolumeName, VolumeSource: corev1.VolumeSource{
+					PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+						ClaimName: dataPVC.Name,
+						ReadOnly:  readOnlyVolume,
+					},
+				},
 			},
-			{Name: rcloneSecret, VolumeSource: corev1.VolumeSource{
-				Secret: &corev1.SecretVolumeSource{
-					SecretName:  rcloneConfigSecret.Name,
-					DefaultMode: ptr.To[int32](0600),
-				}},
+			{
+				Name: rcloneSecret, VolumeSource: corev1.VolumeSource{
+					Secret: &corev1.SecretVolumeSource{
+						SecretName:  rcloneConfigSecret.Name,
+						DefaultMode: ptr.To[int32](0600),
+					},
+				},
 			},
-			{Name: "tempdir", VolumeSource: corev1.VolumeSource{
-				EmptyDir: &corev1.EmptyDirVolumeSource{
-					Medium: corev1.StorageMediumMemory,
-				}},
+			{
+				Name: "tempdir", VolumeSource: corev1.VolumeSource{
+					EmptyDir: &corev1.EmptyDirVolumeSource{
+						Medium: corev1.StorageMediumMemory,
+					},
+				},
 			},
 		}
 		if m.vh.IsCopyMethodDirect() {
@@ -328,11 +335,10 @@ func (m *Mover) ensureJob(ctx context.Context, dataPVC *corev1.PersistentVolumeC
 				Value: path.Join(rcloneCAMountPath, rcloneCAFilename),
 			})
 			// Mount the custom CA certificate
-			podSpec.Containers[0].VolumeMounts =
-				append(podSpec.Containers[0].VolumeMounts, corev1.VolumeMount{
-					Name:      "custom-ca",
-					MountPath: rcloneCAMountPath,
-				})
+			podSpec.Containers[0].VolumeMounts = append(podSpec.Containers[0].VolumeMounts, corev1.VolumeMount{
+				Name:      "custom-ca",
+				MountPath: rcloneCAMountPath,
+			})
 			podSpec.Volumes = append(podSpec.Volumes, corev1.Volume{
 				Name:         "custom-ca",
 				VolumeSource: customCAObj.GetVolumeSource(rcloneCAFilename),

@@ -236,20 +236,39 @@ func (vh *VolumeHandler) getPVCByName(ctx context.Context, pvcName string) (*cor
 	return pvc, err
 }
 
+func (vh *VolumeHandler) EnsureNewPVC(ctx context.Context, log logr.Logger, name string,
+) (*corev1.PersistentVolumeClaim, error) {
+	return vh.EnsureNewPVCWithLabels(ctx, log, name, nil, nil, nil)
+}
+
+// Allows to specify additional labels to add to the PVC to be created
+// Set accessModes/capacity if this individual pvc may have different values from the volumehandler settings. (i.e.
+// in a group snapshot scenario each pvc may have different values).
+// if accessModes is not set, vh.accessModes will be used
+// if capacity is not set, vh.capacity will be used
 // nolint: funlen
-func (vh *VolumeHandler) EnsureNewPVC(ctx context.Context, log logr.Logger,
-	name string, pvcLabels map[string]string,
+func (vh *VolumeHandler) EnsureNewPVCWithLabels(ctx context.Context, log logr.Logger,
+	name string, pvcLabels map[string]string, accessModes []corev1.PersistentVolumeAccessMode, capacity *resource.Quantity,
 ) (*corev1.PersistentVolumeClaim, error) {
 	logger := log.WithValues("PVC", name)
 
 	// Ensure required configuration parameters have been provided in order to
 	// create volume
-	if len(vh.accessModes) == 0 {
+	if len(accessModes) == 0 {
+		// Use global access modes from the volumehandler
+		accessModes = vh.accessModes
+	}
+	if len(accessModes) == 0 {
 		err := errors.New("accessModes must be provided when destinationPVC is not")
 		logger.Error(err, "error allocating new PVC")
 		return nil, err
 	}
-	if vh.capacity == nil {
+
+	if capacity == nil {
+		// Use global capacity from the volumehandler
+		capacity = vh.capacity
+	}
+	if capacity == nil {
 		err := errors.New("capacity must be provided when destinationPVC is not")
 		logger.Error(err, "error allocating new PVC")
 		return nil, err
@@ -270,14 +289,14 @@ func (vh *VolumeHandler) EnsureNewPVC(ctx context.Context, log logr.Logger,
 		utils.AddAllLabels(pvc, pvcLabels)
 		utils.SetOwnedByVolSync(pvc)
 		if pvc.CreationTimestamp.IsZero() { // set immutable fields
-			pvc.Spec.AccessModes = vh.accessModes
+			pvc.Spec.AccessModes = accessModes
 			pvc.Spec.StorageClassName = vh.storageClassName
 			volumeMode := corev1.PersistentVolumeFilesystem
 			pvc.Spec.VolumeMode = &volumeMode
 		}
 
 		pvc.Spec.Resources.Requests = corev1.ResourceList{
-			corev1.ResourceStorage: *vh.capacity,
+			corev1.ResourceStorage: *capacity,
 		}
 		return nil
 	})

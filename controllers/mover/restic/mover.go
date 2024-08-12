@@ -90,6 +90,7 @@ var _ mover.Mover = &Mover{}
 // individual objects to be cleaned up must also be marked.
 var cleanupTypes = []client.Object{
 	&corev1.PersistentVolumeClaim{},
+	// TODO: volumegroupsnapshots if supported
 	&snapv1.VolumeSnapshot{},
 	&batchv1.Job{},
 }
@@ -174,7 +175,8 @@ func (m *Mover) Cleanup(ctx context.Context) (mover.Result, error) {
 }
 
 func (m *Mover) ensureCache(ctx context.Context,
-	dataPVC *corev1.PersistentVolumeClaim) (*corev1.PersistentVolumeClaim, error) {
+	dataPVC *corev1.PersistentVolumeClaim,
+) (*corev1.PersistentVolumeClaim, error) {
 	// Create a separate vh for the Restic cache volume that's based on the main
 	// vh, but override options where necessary.
 	cacheConfig := []volumehandler.VHOption{
@@ -211,7 +213,7 @@ func (m *Mover) ensureCache(ctx context.Context,
 	// Allocate cache volume
 	cacheName := mover.VolSyncPrefix + m.owner.GetName() + "-cache"
 	m.logger.Info("allocating cache volume", "PVC", cacheName)
-	return cacheVh.EnsureNewPVC(ctx, m.logger, cacheName, nil)
+	return cacheVh.EnsureNewPVC(ctx, m.logger, cacheName)
 }
 
 func (m *Mover) ensureSourcePVC(ctx context.Context) (*corev1.PersistentVolumeClaim, error) {
@@ -246,7 +248,7 @@ func (m *Mover) ensureDestinationPVC(ctx context.Context) (*corev1.PersistentVol
 		return m.vh.UseProvidedPVC(ctx, dataPVCName)
 	}
 	// Need to allocate the incoming data volume
-	return m.vh.EnsureNewPVC(ctx, m.logger, dataPVCName, nil)
+	return m.vh.EnsureNewPVC(ctx, m.logger, dataPVCName)
 }
 
 func (m *Mover) getDestinationPVCName() (bool, string) {
@@ -276,7 +278,8 @@ func (m *Mover) validateRepository(ctx context.Context) (*corev1.Secret, error) 
 //nolint:funlen
 func (m *Mover) ensureJob(ctx context.Context, cachePVC *corev1.PersistentVolumeClaim,
 	dataPVC *corev1.PersistentVolumeClaim, sa *corev1.ServiceAccount, repo *corev1.Secret,
-	customCAObj utils.CustomCAObject) (*batchv1.Job, error) {
+	customCAObj utils.CustomCAObject,
+) (*batchv1.Job, error) {
 	dir := "src"
 	if !m.isSource {
 		dir = "dst"
@@ -308,8 +311,8 @@ func (m *Mover) ensureJob(ctx context.Context, cachePVC *corev1.PersistentVolume
 		job.Spec.Parallelism = &parallelism
 		forgetOptions := generateForgetOptions(m.retainPolicy)
 		// set default values
-		var restoreAsOf = ""
-		var previous = strconv.Itoa(int(int32(0)))
+		restoreAsOf := ""
+		previous := strconv.Itoa(int(int32(0)))
 
 		readOnlyVolume := false
 		var actions []string
@@ -438,21 +441,27 @@ func (m *Mover) ensureJob(ctx context.Context, cachePVC *corev1.PersistentVolume
 		podSpec.RestartPolicy = corev1.RestartPolicyNever
 		podSpec.ServiceAccountName = sa.Name
 		podSpec.Volumes = []corev1.Volume{
-			{Name: dataVolumeName, VolumeSource: corev1.VolumeSource{
-				PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
-					ClaimName: dataPVC.Name,
-					ReadOnly:  readOnlyVolume,
-				}},
+			{
+				Name: dataVolumeName, VolumeSource: corev1.VolumeSource{
+					PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+						ClaimName: dataPVC.Name,
+						ReadOnly:  readOnlyVolume,
+					},
+				},
 			},
-			{Name: resticCache, VolumeSource: corev1.VolumeSource{
-				PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
-					ClaimName: cachePVC.Name,
-				}},
+			{
+				Name: resticCache, VolumeSource: corev1.VolumeSource{
+					PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+						ClaimName: cachePVC.Name,
+					},
+				},
 			},
-			{Name: "tempdir", VolumeSource: corev1.VolumeSource{
-				EmptyDir: &corev1.EmptyDirVolumeSource{
-					Medium: corev1.StorageMediumMemory,
-				}},
+			{
+				Name: "tempdir", VolumeSource: corev1.VolumeSource{
+					EmptyDir: &corev1.EmptyDirVolumeSource{
+						Medium: corev1.StorageMediumMemory,
+					},
+				},
 			},
 		}
 		if m.vh.IsCopyMethodDirect() {
@@ -471,11 +480,10 @@ func (m *Mover) ensureJob(ctx context.Context, cachePVC *corev1.PersistentVolume
 				Value: path.Join(resticCAMountPath, resticCAFilename),
 			})
 			// Mount the custom CA certificate
-			podSpec.Containers[0].VolumeMounts =
-				append(podSpec.Containers[0].VolumeMounts, corev1.VolumeMount{
-					Name:      "custom-ca",
-					MountPath: resticCAMountPath,
-				})
+			podSpec.Containers[0].VolumeMounts = append(podSpec.Containers[0].VolumeMounts, corev1.VolumeMount{
+				Name:      "custom-ca",
+				MountPath: resticCAMountPath,
+			})
 			podSpec.Volumes = append(podSpec.Volumes, corev1.Volume{
 				Name:         "custom-ca",
 				VolumeSource: customCAObj.GetVolumeSource(resticCAFilename),
@@ -495,11 +503,10 @@ func (m *Mover) ensureJob(ctx context.Context, cachePVC *corev1.PersistentVolume
 				Value: path.Join(credentialDir, gcsCredentialFile),
 			})
 			// Mount the credential file
-			container.VolumeMounts =
-				append(container.VolumeMounts, corev1.VolumeMount{
-					Name:      "gcs-credentials",
-					MountPath: credentialDir,
-				})
+			container.VolumeMounts = append(container.VolumeMounts, corev1.VolumeMount{
+				Name:      "gcs-credentials",
+				MountPath: credentialDir,
+			})
 			podSpec.Volumes = append(podSpec.Volumes, corev1.Volume{
 				Name: "gcs-credentials",
 				VolumeSource: corev1.VolumeSource{

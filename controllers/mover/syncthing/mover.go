@@ -154,7 +154,7 @@ func (m *Mover) Synchronize(ctx context.Context) (mover.Result, error) {
 	if err = m.interactWithSyncthing(dataService, secretAPIKey); err != nil {
 		return mover.InProgress(), err
 	}
-	var retryAfter = 20 * time.Second
+	retryAfter := 20 * time.Second
 	return mover.RetryAfter(retryAfter), nil
 }
 
@@ -279,7 +279,7 @@ func (m *Mover) ensureConfigPVC(
 	// Allocate the config volume
 	configName := mover.VolSyncPrefix + m.owner.GetName() + "-config"
 	m.logger.Info("allocating config volume", "PVC", configName)
-	return configVh.EnsureNewPVC(ctx, m.logger, configName, nil)
+	return configVh.EnsureNewPVC(ctx, m.logger, configName)
 }
 
 // ensureDataPVC Ensures that the PVC holding the data meant to be synced is available.
@@ -373,7 +373,8 @@ func (m *Mover) ensureSecretAPIKey(ctx context.Context) (*corev1.Secret, error) 
 //nolint:funlen
 func (m *Mover) ensureDeployment(ctx context.Context, dataPVC *corev1.PersistentVolumeClaim,
 	configPVC *corev1.PersistentVolumeClaim, sa *corev1.ServiceAccount,
-	apiSecret *corev1.Secret) (*appsv1.Deployment, error) {
+	apiSecret *corev1.Secret,
+) (*appsv1.Deployment, error) {
 	// same thing as ensureJob, except this creates a deployment instead of a job
 	var numReplicas int32 = 1
 
@@ -548,7 +549,6 @@ func (m *Mover) ensureDeployment(ctx context.Context, dataPVC *corev1.Persistent
 
 		return nil
 	})
-
 	// error from createOrUpdate against a deployment indicates an issue
 	if err != nil {
 		m.logger.Error(err, "unable to create deployment")
@@ -590,7 +590,6 @@ func (m *Mover) ensureAPIService(ctx context.Context, deployment *appsv1.Deploym
 		}
 		return nil
 	})
-
 	// return service XOR error
 	if err != nil {
 		return nil, err
@@ -758,7 +757,8 @@ func (m *Mover) ensureIsConfigured(apiSecret *corev1.Secret, syncthing *api.Sync
 
 // ensureStatusIsUpdated Updates the mover's status to be reported by the ReplicationSource object.
 func (m *Mover) ensureStatusIsUpdated(dataSVC *corev1.Service,
-	syncthing *api.Syncthing) error {
+	syncthing *api.Syncthing,
+) error {
 	// fail until we can get the address
 	addr, err := m.GetDataServiceAddress(dataSVC)
 	if err != nil {

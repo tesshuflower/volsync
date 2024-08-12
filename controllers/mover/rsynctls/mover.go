@@ -462,7 +462,7 @@ func (m *Mover) ensureDestinationPVC(ctx context.Context) (*corev1.PersistentVol
 		return m.vh.UseProvidedPVC(ctx, dataPVCName)
 	}
 	// Need to allocate the incoming data volume
-	return m.vh.EnsureNewPVC(ctx, m.logger, dataPVCName, nil)
+	return m.vh.EnsureNewPVC(ctx, m.logger, dataPVCName)
 }
 
 // func (m *Mover) ensureDestinationPVC(ctx context.Context) (*corev1.PersistentVolumeClaim, error) {
@@ -484,7 +484,6 @@ func (m *Mover) ensureDestinationPVCs(ctx context.Context) (*pvcGroup, error) {
 		pvcLabels := map[string]string{
 			volGroupLabelKey: volGroupLabelValue,
 		}
-
 		// This label will be used as our label selector (will be used later to create a volume group snap)
 		dstPVCGroup.volumeGroupPVCLabelSelector = &metav1.LabelSelector{
 			MatchLabels: pvcLabels,
@@ -492,9 +491,10 @@ func (m *Mover) ensureDestinationPVCs(ctx context.Context) (*pvcGroup, error) {
 
 		for _, memberPVC := range m.mainPVCGroup {
 			// Need to allocate the incoming data volumes
-			newPVC, err := m.vh.EnsureNewPVC(ctx, m.logger, memberPVC.GetDestinationPVCName(), pvcLabels)
-			// FIXME: the above won't work if any pvcs have differing sizes or if they already exist.
-			// FIXME: this is just temporary to test out for the moment
+			newPVC, err := m.vh.EnsureNewPVCWithLabels(ctx, m.logger, memberPVC.GetDestinationPVCName(),
+				pvcLabels, memberPVC.AccessModes, memberPVC.Capacity)
+			// FIXME: the above won't work if any pvcs already exist - could potentially alter EnsureNewPVC() to not add
+			// volsync ownership unless at creation time to handle this?
 			if err != nil || newPVC == nil {
 				return nil, err
 			}
@@ -512,7 +512,7 @@ func (m *Mover) ensureDestinationPVCs(ctx context.Context) (*pvcGroup, error) {
 			}
 		}
 		// Need to allocate the incoming data volume
-		pvc, err := m.vh.EnsureNewPVC(ctx, m.logger, dataPVCName, nil)
+		pvc, err := m.vh.EnsureNewPVC(ctx, m.logger, dataPVCName)
 		if err != nil || pvc == nil {
 			return nil, err
 		}

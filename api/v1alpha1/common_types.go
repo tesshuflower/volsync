@@ -37,6 +37,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -199,12 +200,20 @@ type DestinationPVCGroup struct {
 }
 */
 type DestinationPVCGroupMember struct {
-	// Name of the original PVC in the volume group being replicated to this destination
+	// Name of the original PVC in the volume group being replicated to this destination.
+	// This must match the name of a PVC from the source group in the ReplicationSource.
 	Name string `json:"name"`
 	// Name the replicationdestination should use for its PVC to replicate into - if not specified, Name will be used.
 	//+optional
 	TempPVCName string `json:"tempPVCName,omitempty"` // TODO: rename field?
-	// TODO: size, spec stuff
+	// capacity is the size of the destination volume to create.
+	// If not specified, the Capacity from the parent mover spec will be used for all group member PVCs
+	//+optional
+	Capacity *resource.Quantity `json:"capacity,omitempty"`
+	// accessModes specifies the access modes for the destination volume.
+	// If not specified, the AccessModes from the parent mover spec will be used for all group member PVCs
+	//+optional
+	AccessModes []corev1.PersistentVolumeAccessMode `json:"accessModes,omitempty"`
 }
 
 func (m DestinationPVCGroupMember) GetOriginalPVCName() string {

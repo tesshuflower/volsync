@@ -334,7 +334,7 @@ func (m *Mover) ensureDestinationPVC(ctx context.Context) (*corev1.PersistentVol
 		return m.vh.UseProvidedPVC(ctx, dataPVCName)
 	}
 	// Need to allocate the incoming data volume
-	return m.vh.EnsureNewPVC(ctx, m.logger, dataPVCName, nil)
+	return m.vh.EnsureNewPVC(ctx, m.logger, dataPVCName)
 }
 
 func (m *Mover) getDestinationPVCName() (bool, string) {
@@ -347,7 +347,8 @@ func (m *Mover) getDestinationPVCName() (bool, string) {
 
 //nolint:funlen
 func (m *Mover) ensureJob(ctx context.Context, dataPVC *corev1.PersistentVolumeClaim,
-	sa *corev1.ServiceAccount, rsyncSecretName string) (*batchv1.Job, error) {
+	sa *corev1.ServiceAccount, rsyncSecretName string,
+) (*batchv1.Job, error) {
 	job := &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      volSyncRsyncPrefix + m.direction() + "-" + m.owner.GetName(),
@@ -441,27 +442,35 @@ func (m *Mover) ensureJob(ctx context.Context, dataPVC *corev1.PersistentVolumeC
 		job.Spec.Template.Spec.RestartPolicy = corev1.RestartPolicyNever
 		job.Spec.Template.Spec.ServiceAccountName = sa.Name
 		job.Spec.Template.Spec.Volumes = []corev1.Volume{
-			{Name: dataVolumeName, VolumeSource: corev1.VolumeSource{
-				PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
-					ClaimName: dataPVC.Name,
-					ReadOnly:  readOnlyVolume,
-				}},
+			{
+				Name: dataVolumeName, VolumeSource: corev1.VolumeSource{
+					PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+						ClaimName: dataPVC.Name,
+						ReadOnly:  readOnlyVolume,
+					},
+				},
 			},
-			{Name: "keys", VolumeSource: corev1.VolumeSource{
-				Secret: &corev1.SecretVolumeSource{
-					SecretName:  rsyncSecretName,
-					DefaultMode: ptr.To[int32](0600),
-				}},
+			{
+				Name: "keys", VolumeSource: corev1.VolumeSource{
+					Secret: &corev1.SecretVolumeSource{
+						SecretName:  rsyncSecretName,
+						DefaultMode: ptr.To[int32](0600),
+					},
+				},
 			},
-			{Name: "tempsshdir", VolumeSource: corev1.VolumeSource{
-				EmptyDir: &corev1.EmptyDirVolumeSource{
-					Medium: corev1.StorageMediumMemory,
-				}},
+			{
+				Name: "tempsshdir", VolumeSource: corev1.VolumeSource{
+					EmptyDir: &corev1.EmptyDirVolumeSource{
+						Medium: corev1.StorageMediumMemory,
+					},
+				},
 			},
-			{Name: "tempdir", VolumeSource: corev1.VolumeSource{
-				EmptyDir: &corev1.EmptyDirVolumeSource{
-					Medium: corev1.StorageMediumMemory,
-				}},
+			{
+				Name: "tempdir", VolumeSource: corev1.VolumeSource{
+					EmptyDir: &corev1.EmptyDirVolumeSource{
+						Medium: corev1.StorageMediumMemory,
+					},
+				},
 			},
 		}
 		if m.vh.IsCopyMethodDirect() {

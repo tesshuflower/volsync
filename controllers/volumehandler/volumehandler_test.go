@@ -32,11 +32,11 @@ import (
 
 	volsyncv1alpha1 "github.com/backube/volsync/api/v1alpha1"
 	"github.com/backube/volsync/controllers/utils"
-	//sc "github.com/backube/volsync/controllers"
+	// sc "github.com/backube/volsync/controllers"
 )
 
 var _ = Describe("Volumehandler", func() {
-	var ctx = context.TODO()
+	ctx := context.TODO()
 	var ns *corev1.Namespace
 	logger := zap.New(zap.UseDevMode(true), zap.WriteTo(GinkgoWriter))
 
@@ -102,12 +102,89 @@ var _ = Describe("Volumehandler", func() {
 				Expect(vh).ToNot(BeNil())
 
 				pvcName := "thepvc"
-				newPVC, err := vh.EnsureNewPVC(context.TODO(), logger, pvcName, nil)
+				newPVC, err := vh.EnsureNewPVC(context.TODO(), logger, pvcName)
 				Expect(err).ToNot(HaveOccurred())
 				Expect(newPVC).ToNot(BeNil())
 				Expect(*newPVC.Spec.StorageClassName).To(Equal(customSC))
 				Expect(*(newPVC.Spec.Resources.Requests.Storage())).To(Equal((capacity)))
 				Expect(newPVC.Name).To(Equal(pvcName))
+			})
+
+			Context("VolumeGroup scenario", func() {
+				When("destinationPVCGroup is specified", func() {
+					BeforeEach(func() {
+						cap1 := resource.MustParse("3Gi")
+						cap2 := resource.MustParse("3Gi")
+						// Technically we don't support vgsnapshots with rsync atm (rsync-tlsl only) but
+						// for this test we're just exercising the volumehandler
+						rd.Spec.Rsync.DestinationPVCGroup = []volsyncv1alpha1.DestinationPVCGroupMember{
+							{
+								Name:        "mypvc-1",
+								TempPVCName: "mypvc-1-dest-copy",
+								AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteMany},
+								Capacity:    &cap1,
+							},
+							{
+								Name:        "mypvc-2",
+								TempPVCName: "mypvc-2-dest-copy",
+								AccessModes: []corev1.PersistentVolumeAccessMode{}, // empty, use the access modes from rd.Spec.Rsync
+								Capacity:    &cap2,
+							},
+							{
+								Name: "mypvc-3",
+								// No TempPVC name, pvc should use "mypvc-3"
+								// No AccessModes, Should use the access modes from rd.Spec.Rsync
+								// No Capacity, should use cpacity from rd.Spec.Rsync
+							},
+						}
+					})
+					It("can be used to provision temporary PVCs for the group", func() {
+						vh, err := NewVolumeHandler(
+							WithClient(k8sClient),
+							WithOwner(rd),
+							FromDestination(&rd.Spec.Rsync.ReplicationDestinationVolumeOptions),
+						)
+						Expect(err).NotTo(HaveOccurred())
+						Expect(vh).ToNot(BeNil())
+
+						myGroupLabels := map[string]string{
+							"mygroup-selector": "mygroup-selector-value",
+						}
+
+						destGrpPVC1 := rd.Spec.Rsync.DestinationPVCGroup[0]
+						newPVC1, err := vh.EnsureNewPVCWithLabels(context.TODO(), logger, destGrpPVC1.GetDestinationPVCName(),
+							myGroupLabels, destGrpPVC1.AccessModes, destGrpPVC1.Capacity)
+						Expect(err).ToNot(HaveOccurred())
+						Expect(newPVC1).ToNot(BeNil())
+						Expect(*newPVC1.Spec.StorageClassName).To(Equal(customSC))
+						Expect(newPVC1.Spec.AccessModes).To(Equal(destGrpPVC1.AccessModes))
+						Expect(newPVC1.Spec.Resources.Requests.Storage()).To(Equal((destGrpPVC1.Capacity)))
+						Expect(newPVC1.Name).To(Equal(destGrpPVC1.TempPVCName))
+
+						destGrpPVC2 := rd.Spec.Rsync.DestinationPVCGroup[1]
+						newPVC2, err := vh.EnsureNewPVCWithLabels(context.TODO(), logger, destGrpPVC2.GetDestinationPVCName(),
+							myGroupLabels, destGrpPVC2.AccessModes, destGrpPVC2.Capacity)
+						Expect(err).ToNot(HaveOccurred())
+						Expect(newPVC2).ToNot(BeNil())
+						Expect(*newPVC2.Spec.StorageClassName).To(Equal(customSC))
+						// This pvc in the grp did not override the accessModes from the spec
+						Expect(newPVC2.Spec.AccessModes).To(Equal(rd.Spec.Rsync.AccessModes))
+						Expect(newPVC2.Spec.Resources.Requests.Storage()).To(Equal((destGrpPVC2.Capacity)))
+						Expect(newPVC2.Name).To(Equal(destGrpPVC2.TempPVCName))
+
+						destGrpPVC3 := rd.Spec.Rsync.DestinationPVCGroup[2]
+						newPVC3, err := vh.EnsureNewPVCWithLabels(context.TODO(), logger, destGrpPVC3.GetDestinationPVCName(),
+							myGroupLabels, destGrpPVC3.AccessModes, destGrpPVC3.Capacity)
+						Expect(err).ToNot(HaveOccurred())
+						Expect(newPVC3).ToNot(BeNil())
+						Expect(*newPVC3.Spec.StorageClassName).To(Equal(customSC))
+						// This pvc in the grp did not override the accessModes from the spec
+						Expect(newPVC3.Spec.AccessModes).To(Equal(rd.Spec.Rsync.AccessModes))
+						// This pvc in the grp did not override cpacity either
+						Expect(newPVC3.Spec.Resources.Requests.Storage()).To(Equal((rd.Spec.Rsync.Capacity)))
+						Expect(newPVC3.Name).To(Equal(destGrpPVC3.Name)) // Should use name, tempName not used
+					})
+				})
 			})
 		})
 
@@ -372,7 +449,6 @@ var _ = Describe("Volumehandler", func() {
 					Expect(*newPVC.Spec.StorageClassName).To(Equal(newSC))
 					Expect(*newPVC.Spec.Resources.Requests.Storage()).To(Equal(newCap))
 					Expect(newPVC.Spec.AccessModes).To(Equal(newAccessModes))
-
 				})
 			})
 		})

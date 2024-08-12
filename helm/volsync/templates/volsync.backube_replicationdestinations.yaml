@@ -139,8 +139,26 @@ spec:
                           MemberPVCs []DestinationPVCGroupMember `json:"memberPVCs,omitempty"`
                           }
                         properties:
+                          accessModes:
+                            description: |-
+                              accessModes specifies the access modes for the destination volume.
+                              If not specified, the AccessModes from the parent mover spec will be used for all group member PVCs
+                            items:
+                              type: string
+                            type: array
+                          capacity:
+                            anyOf:
+                              - type: integer
+                              - type: string
+                            description: |-
+                              capacity is the size of the destination volume to create.
+                              If not specified, the Capacity from the parent mover spec will be used for all group member PVCs
+                            pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                            x-kubernetes-int-or-string: true
                           name:
-                            description: Name of the original PVC in the volume group being replicated to this destination
+                            description: |-
+                              Name of the original PVC in the volume group being replicated to this destination.
+                              This must match the name of a PVC from the source group in the ReplicationSource.
                             type: string
                           tempPVCName:
                             description: Name the replicationdestination should use for its PVC to replicate into - if not specified, Name will be used.
@@ -1403,8 +1421,26 @@ spec:
                           MemberPVCs []DestinationPVCGroupMember `json:"memberPVCs,omitempty"`
                           }
                         properties:
+                          accessModes:
+                            description: |-
+                              accessModes specifies the access modes for the destination volume.
+                              If not specified, the AccessModes from the parent mover spec will be used for all group member PVCs
+                            items:
+                              type: string
+                            type: array
+                          capacity:
+                            anyOf:
+                              - type: integer
+                              - type: string
+                            description: |-
+                              capacity is the size of the destination volume to create.
+                              If not specified, the Capacity from the parent mover spec will be used for all group member PVCs
+                            pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                            x-kubernetes-int-or-string: true
                           name:
-                            description: Name of the original PVC in the volume group being replicated to this destination
+                            description: |-
+                              Name of the original PVC in the volume group being replicated to this destination.
+                              This must match the name of a PVC from the source group in the ReplicationSource.
                             type: string
                           tempPVCName:
                             description: Name the replicationdestination should use for its PVC to replicate into - if not specified, Name will be used.
@@ -2638,8 +2674,26 @@ spec:
                           MemberPVCs []DestinationPVCGroupMember `json:"memberPVCs,omitempty"`
                           }
                         properties:
+                          accessModes:
+                            description: |-
+                              accessModes specifies the access modes for the destination volume.
+                              If not specified, the AccessModes from the parent mover spec will be used for all group member PVCs
+                            items:
+                              type: string
+                            type: array
+                          capacity:
+                            anyOf:
+                              - type: integer
+                              - type: string
+                            description: |-
+                              capacity is the size of the destination volume to create.
+                              If not specified, the Capacity from the parent mover spec will be used for all group member PVCs
+                            pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                            x-kubernetes-int-or-string: true
                           name:
-                            description: Name of the original PVC in the volume group being replicated to this destination
+                            description: |-
+                              Name of the original PVC in the volume group being replicated to this destination.
+                              This must match the name of a PVC from the source group in the ReplicationSource.
                             type: string
                           tempPVCName:
                             description: Name the replicationdestination should use for its PVC to replicate into - if not specified, Name will be used.
@@ -2812,8 +2866,26 @@ spec:
                           MemberPVCs []DestinationPVCGroupMember `json:"memberPVCs,omitempty"`
                           }
                         properties:
+                          accessModes:
+                            description: |-
+                              accessModes specifies the access modes for the destination volume.
+                              If not specified, the AccessModes from the parent mover spec will be used for all group member PVCs
+                            items:
+                              type: string
+                            type: array
+                          capacity:
+                            anyOf:
+                              - type: integer
+                              - type: string
+                            description: |-
+                              capacity is the size of the destination volume to create.
+                              If not specified, the Capacity from the parent mover spec will be used for all group member PVCs
+                            pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                            x-kubernetes-int-or-string: true
                           name:
-                            description: Name of the original PVC in the volume group being replicated to this destination
+                            description: |-
+                              Name of the original PVC in the volume group being replicated to this destination.
+                              This must match the name of a PVC from the source group in the ReplicationSource.
                             type: string
                           tempPVCName:
                             description: Name the replicationdestination should use for its PVC to replicate into - if not specified, Name will be used.
