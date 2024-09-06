@@ -237,7 +237,6 @@ type ReplicationDestinationResticSpec struct {
 	// Defaults to false.
 	//+optional
 	EnableFileDeletion bool `json:"enableFileDeletion,omitempty"`
-	Delete bool `json:"delete,omitempty"`
 	// overwrite will pass the --overwrite flag with the value specified to the restic restore command.
 	// The restic default is "always" and will be used if this field is not specified.
 	//+optional

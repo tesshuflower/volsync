@@ -85,10 +85,7 @@ type Mover struct {
 	previous                    *int32
 	restoreAsOf                 *string
 	enableFileDeletionOnRestore bool
-	previous             *int32
-	restoreAsOf          *string
-	deleteFilesOnRestore bool
-	overwrite            *volsyncv1alpha1.ResticOverwriteType
+	overwrite                   *volsyncv1alpha1.ResticOverwriteType
 }
 
 var _ mover.Mover = &Mover{}
@@ -345,9 +342,8 @@ func (m *Mover) ensureJob(ctx context.Context, cachePVC *corev1.PersistentVolume
 				previous = strconv.Itoa(int(*m.previous))
 			}
 
-			// Delete option for restores, default is false (mover.enableFileDeletionOnRestore is only set in the builder
-			// for replicationdestinations)
-			restoreOptions = generateRestoreOptions(m.deleteFilesOnRestore, m.overwrite)
+			// delete and overwrite options
+			restoreOptions = generateRestoreOptions(m.enableFileDeletionOnRestore, m.overwrite)
 		}
 		logger.Info("job actions", "actions", actions)
 		podSpec := &job.Spec.Template.Spec
@@ -652,9 +648,9 @@ func generateForgetOptions(policy *volsyncv1alpha1.ResticRetainPolicy) string {
 	return forget
 }
 
-func generateRestoreOptions(deleteFilesOnRestore bool, overwrite *volsyncv1alpha1.ResticOverwriteType) string {
+func generateRestoreOptions(enableFileDeletionOnRestore bool, overwrite *volsyncv1alpha1.ResticOverwriteType) string {
 	var restoreOptions string
-	if deleteFilesOnRestore {
+	if enableFileDeletionOnRestore {
 		restoreOptions = "--delete"
 	}
 	if overwrite != nil {

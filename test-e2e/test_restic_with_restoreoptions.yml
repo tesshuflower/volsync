@@ -6,7 +6,6 @@
     - unprivileged
     - restoreoptions
     - enableFileDeletion
-    - delete
     - overwrite
     - never
     - if-changed

@@ -287,9 +287,15 @@ restoreAsOf
    separated by a ``T``. E.g, ``2022-08-10T20:01:03-04:00`` will work but
    ``2022-08-10 20:01:03-04:00`` will fail.
 delete
-   A boolean indicating whether files and directories that exist on the pvc
-   being restored to should be deleted if they do not exist in the restic
-   snapshot being restored. The default value is ``false``.
+   An optional boolean indicating whether files and directories that exist
+   on the PVC being restored to should be deleted if they do not exist in the
+   restic snapshot being restored. The default value is ``false``.
+overwrite
+   This optional field will be passed with the --overwrite flag to the
+   restic restore command. If data already exists on the PVC being restored
+   to, files will be updated according to the overwrite setting.
+   Allowed values are ``always``, ``if-changed``, ``if-newer`` and ``never``.
+   If not set, the default restic will use is ``always``.
 
 Using a custom certificate authority
 ====================================
