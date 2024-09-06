@@ -278,6 +278,11 @@ func (in *ReplicationDestinationResticSpec) DeepCopyInto(out *ReplicationDestina
 		*out = new(string)
 		**out = **in
 	}
+	if in.Overwrite != nil {
+		in, out := &in.Overwrite, &out.Overwrite
+		*out = new(ResticOverwriteType)
+		**out = **in
+	}
 	in.MoverConfig.DeepCopyInto(&out.MoverConfig)
 }
 

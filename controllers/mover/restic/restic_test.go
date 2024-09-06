@@ -22,6 +22,7 @@ package restic
 import (
 	"context"
 	"flag"
+	"fmt"
 	"os"
 	"path"
 	"strings"
@@ -2163,6 +2164,7 @@ var _ = Describe("Restic as a destination", func() {
 				})
 			})
 
+			//nolint:goconst
 			Context("Restore options", func() {
 				When("No restore options are specified", func() {
 					It("should set env vars related to restore options with defaults", func() {
@@ -2229,7 +2231,66 @@ var _ = Describe("Restic as a destination", func() {
 						Expect(restoreOptions).NotTo(BeNil())
 						Expect(restoreOptions.Value).To(Equal("--delete"))
 					})
+					Context("When overwrite option is also specified", func() {
+						BeforeEach(func() {
+							ifChanged := volsyncv1alpha1.ResticOverwriteIfChanged
+							rd.Spec.Restic.Overwrite = &ifChanged
+						})
+						It("Should set RESTORE_OPTIONS properly with both --overwrite and --delete", func() {
+							j, e := mover.ensureJob(ctx, cache, dPVC, sa, repo, nil)
+							Expect(e).NotTo(HaveOccurred())
+							Expect(j).To(BeNil()) // hasn't completed
+							nsn := types.NamespacedName{Name: jobName, Namespace: ns.Name}
+							job = &batchv1.Job{}
+							Expect(k8sClient.Get(ctx, nsn, job)).To(Succeed())
+
+							var restoreOptions *corev1.EnvVar
+							envVars := job.Spec.Template.Spec.Containers[0].Env
+							for i := range envVars {
+								envVar := envVars[i]
+								if envVar.Name == "RESTORE_OPTIONS" {
+									restoreOptions = &envVar
+								}
+							}
+							Expect(restoreOptions).NotTo(BeNil())
+							Expect(restoreOptions.Value).To(Equal("--delete --overwrite if-changed"))
+						})
+					})
 				})
+
+				overwriteTypes := []volsyncv1alpha1.ResticOverwriteType{
+					volsyncv1alpha1.ResticOverwriteAlways,
+					volsyncv1alpha1.ResticOverwriteIfChanged,
+					volsyncv1alpha1.ResticOverwriteIfNewer,
+					volsyncv1alpha1.ResticOverwriteNever,
+				}
+				for i := range overwriteTypes {
+					When(fmt.Sprintf("When the overwrite option %s is specified", overwriteTypes[i]), func() {
+						overwriteType := overwriteTypes[i]
+						BeforeEach(func() {
+							rd.Spec.Restic.Overwrite = &overwriteType
+						})
+						It("Should set the RESTORE_OPTIONS accordingly", func() {
+							j, e := mover.ensureJob(ctx, cache, dPVC, sa, repo, nil)
+							Expect(e).NotTo(HaveOccurred())
+							Expect(j).To(BeNil()) // hasn't completed
+							nsn := types.NamespacedName{Name: jobName, Namespace: ns.Name}
+							job = &batchv1.Job{}
+							Expect(k8sClient.Get(ctx, nsn, job)).To(Succeed())
+
+							var restoreOptions *corev1.EnvVar
+							envVars := job.Spec.Template.Spec.Containers[0].Env
+							for i := range envVars {
+								envVar := envVars[i]
+								if envVar.Name == "RESTORE_OPTIONS" {
+									restoreOptions = &envVar
+								}
+							}
+							Expect(restoreOptions).NotTo(BeNil())
+							Expect(restoreOptions.Value).To(Equal(fmt.Sprintf("--overwrite %s", overwriteType)))
+						})
+					})
+				}
 			})
 
 			Context("Cluster wide proxy settings", func() {

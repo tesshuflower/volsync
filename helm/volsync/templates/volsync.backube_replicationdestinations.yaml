@@ -2522,6 +2522,16 @@ spec:
                         users who want to override the service account normally used by the mover.
                         The service account needs to exist in the same namespace as this CR.
                       type: string
+                    overwrite:
+                      description: |-
+                        overwrite will pass the --overwrite flag with the value specified to the restic restore command.
+                        The restic default is "always" and will be used if this field is not specified.
+                      enum:
+                        - always
+                        - if-changed
+                        - if-newer
+                        - never
+                      type: string
                     previous:
                       description: Previous specifies the number of image to skip before selecting one to restore from
                       format: int32

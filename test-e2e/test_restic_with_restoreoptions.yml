@@ -6,6 +6,10 @@
     - unprivileged
     - restoreoptions
     - enableFileDeletion
+    - delete
+    - overwrite
+    - never
+    - if-changed
   vars:
     restic_secret_name: restic-secret
   tasks:
@@ -54,7 +58,6 @@
       vars:
         data: 'data'
         path: '/testfile1'
-        file_count: 2
         pvc_name: 'data-source'
 
     - name: Write data into the source PVC at a subdirectory
@@ -296,7 +299,7 @@
         res.resources[0].status.lastManualSync=="restore-with-delete" and
         res.resources[0].status.latestMoverStatus is defined and
         res.resources[0].status.latestMoverStatus.result == "Successful" and
-        res.resources[0].status.latestMoverStatus.logs is search("RESTORE_OPTIONS*") and
+        res.resources[0].status.latestMoverStatus.logs is search("RESTORE_OPTIONS: --delete") and
         res.resources[0].status.latestMoverStatus.logs is search("restoring.*") and
         res.resources[0].status.latestMoverStatus.logs is search("Restic completed in.*")
       delay: 1
@@ -308,3 +311,218 @@
       vars:
         pvc1_name: data-source
         pvc2_name: data-dest
+
+    # Now test the overwrite flag
+    - name: Write data into the source PVC - modify existing "/testfile1"
+      include_role:
+        name: write_to_pvc
+      vars:
+        data: 'data-updated'
+        path: '/testfile1'
+        pvc_name: 'data-source'
+
+    - name: Trigger another backup
+      kubernetes.core.k8s:
+        state: patched
+        definition:
+          apiVersion: volsync.backube/v1alpha1
+          kind: ReplicationSource
+          metadata:
+            name: source
+            namespace: "{{ namespace }}"
+          spec:
+            trigger:
+              manual: twice
+
+    - name: Wait for sync to MinIO to complete (2nd backup)
+      kubernetes.core.k8s_info:
+        api_version: volsync.backube/v1alpha1
+        kind: ReplicationSource
+        name: source
+        namespace: "{{ namespace }}"
+      register: res
+      until: >
+        res.resources | length > 0 and
+        res.resources[0].status.lastManualSync is defined and
+        res.resources[0].status.lastManualSync=="twice" and
+        res.resources[0].status.latestMoverStatus is defined and
+        res.resources[0].status.latestMoverStatus.result == "Successful" and
+        res.resources[0].status.latestMoverStatus.logs is search("processed.*files") and
+        res.resources[0].status.latestMoverStatus.logs is search("snapshot.*saved") and
+        res.resources[0].status.latestMoverStatus.logs is search("Restic completed in.*")
+      delay: 1
+      retries: 900
+
+    - name: Create another dest PVC (restore volume)
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          kind: PersistentVolumeClaim
+          apiVersion: v1
+          metadata:
+            name: data-dest-2
+            namespace: "{{ namespace }}"
+          spec:
+            accessModes:
+              - ReadWriteOnce
+            resources:
+              requests:
+                storage: 1Gi
+
+    # Run affinity pod attached to both pvcs to make sure they end up in the
+    # same availability zone so they can be mounted by a single pod later
+    # when running compare-pvcs
+    # We're going to compare data-dest and data-dest-2 so make sure they're
+    # in the same availability zone (and data-source will be in the same as data-dest already)
+    - name: Run pvc affinity pod for new dest PVC
+      include_role:
+        name: pvc_affinity_pod
+      vars:
+        pvc_names:
+          - data-dest
+          - data-dest-2
+
+    # Write data that should match what we originally had in the first backup.
+    # This should match testfile1 in data-dest as we restored from that original backup.
+    - name: Write data into the new dest PVC (to match what we oriignally had for testfile1)
+      include_role:
+        name: write_to_pvc
+      vars:
+        data: 'data'
+        path: '/testfile1'
+        pvc_name: 'data-dest-2'
+
+    # Restore data to new data-dest-2 PVC and use overwrite flag
+    - name: Restore data to 2nd destination PVC with overwrite never (w/ mSC)
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: volsync.backube/v1alpha1
+          kind: ReplicationDestination
+          metadata:
+            name: restore-2
+            namespace: "{{ namespace }}"
+          spec:
+            trigger:
+              manual: restore-with-overwrite-never
+            restic:
+              overwrite: never
+              repository: "{{ restic_secret_name }}"
+              destinationPVC: data-dest-2
+              copyMethod: Direct
+              cacheCapacity: 1Gi
+              moverSecurityContext: "{{ podSecurityContext }}"
+      when: podSecurityContext is defined
+
+    - name: Restore data to 2nd destination PVC with overwrite never (w/o mSC)
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: volsync.backube/v1alpha1
+          kind: ReplicationDestination
+          metadata:
+            name: restore-2
+            namespace: "{{ namespace }}"
+          spec:
+            trigger:
+              manual: restore-with-overwrite-never
+            restic:
+              overwrite: never
+              repository: "{{ restic_secret_name }}"
+              destinationPVC: data-dest-2
+              copyMethod: Direct
+              cacheCapacity: 1Gi
+      when: podSecurityContext is not defined
+
+    - name: Wait for restore with overwrite never (to data-dest-2 pvc) to complete
+      kubernetes.core.k8s_info:
+        api_version: volsync.backube/v1alpha1
+        kind: ReplicationDestination
+        name: restore-2
+        namespace: "{{ namespace }}"
+      register: res
+      until: >
+        res.resources | length > 0 and
+        res.resources[0].status.lastManualSync is defined and
+        res.resources[0].status.lastManualSync=="restore-with-overwrite-never" and
+        res.resources[0].status.latestMoverStatus is defined and
+        res.resources[0].status.latestMoverStatus.result == "Successful" and
+        res.resources[0].status.latestMoverStatus.logs is search("RESTORE_OPTIONS: --overwrite never") and
+        res.resources[0].status.latestMoverStatus.logs is search("restoring.*") and
+        res.resources[0].status.latestMoverStatus.logs is search("Restic completed in.*")
+      delay: 1
+      retries: 300
+
+    - name: Shutdown pvc affinity pod
+      include_role:
+        name: pvc_affinity_pod
+        tasks_from: "delete"
+
+    # data-dest and data-dest-2 contents should now match as we asked not to overwrite /testfile1 (which is the only
+    # file changed in the latest backup) - the rest of the files should match, and we wrote /testfile1 contents in
+    # data-dest-2 to match what was in the original backup
+    - name: Verify contents of PVC (comparing data-dest and data-dest-2)
+      include_role:
+        name: compare_pvc_data
+      vars:
+        pvc1_name: data-dest
+        pvc2_name: data-dest-2
+
+    #
+    # Now test delete and overwrite at the same time
+    #
+    # Write extra file to data-dest-2
+    - name: Write extra data into the data-dest-2 PVC
+      include_role:
+        name: write_to_pvc
+      vars:
+        data: 'newdataindest-2-not-backup'
+        path: '/another-testfile'
+        pvc_name: 'data-dest'
+
+    # This restore to data-dest-2 should delete any files in the dest pvc that aren't in the restic snapshot
+    # Also we're setting overwrite to if-changed which should cause it to overwrite our /testfile1 with the contents
+    # in the latest backup
+    - name: Trigger another restore with the delete option
+      kubernetes.core.k8s:
+        state: patched
+        definition:
+          apiVersion: volsync.backube/v1alpha1
+          kind: ReplicationDestination
+          metadata:
+            name: restore-2
+            namespace: "{{ namespace }}"
+          spec:
+            restic:
+              delete: true
+              overwrite: if-changed
+            trigger:
+              manual: restore-with-delete-and-overwrite-if-changed
+
+    - name: Wait for 2nd restore to data-dest-2 to complete
+      kubernetes.core.k8s_info:
+        api_version: volsync.backube/v1alpha1
+        kind: ReplicationDestination
+        name: restore-2
+        namespace: "{{ namespace }}"
+      register: res
+      until: >
+        res.resources | length > 0 and
+        res.resources[0].status.lastManualSync is defined and
+        res.resources[0].status.lastManualSync=="restore-with-delete-and-overwrite-if-changed" and
+        res.resources[0].status.latestMoverStatus is defined and
+        res.resources[0].status.latestMoverStatus.result == "Successful" and
+        res.resources[0].status.latestMoverStatus.logs is search("RESTORE_OPTIONS: --delete --overwrite if-changed") and
+        res.resources[0].status.latestMoverStatus.logs is search("restoring.*") and
+        res.resources[0].status.latestMoverStatus.logs is search("Restic completed in.*")
+      delay: 1
+      retries: 300
+
+    # Now contents of data-dest-2 should match our source pvc
+    # extra file should be deleted, and /testfile1 should be updated to match our latest backup
+    - name: Verify contents of PVC (comparing data-source and data-dest-2)
+      include_role:
+        name: compare_pvc_data
+      vars:
+        pvc1_name: data-source
+        pvc2_name: data-dest-2

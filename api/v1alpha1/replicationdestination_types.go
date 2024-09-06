@@ -237,9 +237,29 @@ type ReplicationDestinationResticSpec struct {
 	// Defaults to false.
 	//+optional
 	EnableFileDeletion bool `json:"enableFileDeletion,omitempty"`
+	Delete bool `json:"delete,omitempty"`
+	// overwrite will pass the --overwrite flag with the value specified to the restic restore command.
+	// The restic default is "always" and will be used if this field is not specified.
+	//+optional
+	Overwrite *ResticOverwriteType `json:"overwrite,omitempty"`
 
 	MoverConfig `json:",inline"`
 }
+
+// ResticOverwriteType defines values possible for the restic --overwrite flag at restore time.
+// +kubebuilder:validation:Enum=always;if-changed;if-newer;never
+type ResticOverwriteType string
+
+const (
+	// This is the restic default - always overwrite already existing files.
+	ResticOverwriteAlways ResticOverwriteType = "always"
+	// Restic will only overwrite existing files if the size and/or modification time have changed.
+	ResticOverwriteIfChanged ResticOverwriteType = "if-changed"
+	// Restic will only overwrite existing files if the file in the snapshot has a newer modification time.
+	ResticOverwriteIfNewer ResticOverwriteType = "if-newer"
+	// Restic will never overwrite existing files.
+	ResticOverwriteNever ResticOverwriteType = "never"
+)
 
 // ReplicationDestinationStatus defines the observed state of ReplicationDestination
 type ReplicationDestinationStatus struct {
